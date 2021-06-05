@@ -1,0 +1,32 @@
+
+title = "webfs service configuration"
+
+[owner]
+name = "Tiniyo"
+organization = "Tiniyo"
+bio = "support@tiniyo.com"
+
+[server]
+port = ":9092"
+queuelen = 0
+errorqueuelen = 10000
+ginmode = "debug"
+
+[logging]
+facility = "local1"
+level = "debug"
+tag = "webfs"
+syslog = "127.0.0.1:514"
+
+[fs]
+fshost = "mediaserver"
+fsport = "8021"
+fspassword = "Tiniyo1234"
+fstimeout = 10
+
+[redis]
+redishost = "redis"
+redisport = "6379"
+redispassword = ""
+redisdb = 0
+

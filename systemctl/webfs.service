@@ -1,0 +1,12 @@
+  [Unit]
+  Description=webfs service
+  After=network.target
+  [Service]
+  Type=simple
+  LimitNOFILE=49152
+  Restart=always
+  RestartSec=1
+  User=root
+  ExecStart=/usr/local/bin/webfs
+  [Install]
+  WantedBy=multi-user.target
