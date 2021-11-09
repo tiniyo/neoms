@@ -1,7 +1,7 @@
 package server
 
 import (
-	"github.com/neoms/controller"
+	"github.com/tiniyo/neoms/controller"
 
 	"github.com/gin-gonic/gin"
 )
@@ -26,6 +26,8 @@ func NewRouter() *gin.Engine {
 				account.GET(":account_id/Call/:call_id", callController.GetCall)
 				account.DELETE(":account_id/Call/:call_id", callController.DeleteCall)
 			}
+
+			versionPath.GET("health", callController.GetHealth)
 		}
 	}
 	return router

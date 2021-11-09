@@ -4,10 +4,10 @@ import (
 	"encoding/json"
 	"fmt"
 	"github.com/patrickmn/go-cache"
-	"github.com/neoms/adapters"
-	"github.com/neoms/adapters/callstate"
-	"github.com/neoms/logger"
-	"github.com/neoms/models"
+	"github.com/tiniyo/neoms/adapters"
+	"github.com/tiniyo/neoms/adapters/callstate"
+	"github.com/tiniyo/neoms/logger"
+	"github.com/tiniyo/neoms/models"
 	"time"
 )
 

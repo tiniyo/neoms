@@ -2,18 +2,35 @@ package managers
 
 import (
 	"fmt"
-	"github.com/neoms/config"
-	"github.com/neoms/helper"
-	"github.com/neoms/logger"
-	"github.com/neoms/models"
+	"github.com/tiniyo/neoms/adapters"
+	"github.com/tiniyo/neoms/config"
+	"github.com/tiniyo/neoms/helper"
+	"github.com/tiniyo/neoms/logger"
+	"github.com/tiniyo/neoms/models"
 )
 
-func enableHeartbeat(data models.CallRequest) {
+type HeartBeatManagerInterface interface {
+	enableHeartbeat(data models.CallRequest)
+	makeHeartBeatRequest(callSid string, heartbeatCount int64) error
+	sendHeartBeat(accId string, callSid string, rate float64, duration int64)
+}
+
+type HeartBeatManager struct {
+	callState adapters.CallStateAdapter
+}
+
+func NewHeartBeatManager(callState adapters.CallStateAdapter) HeartBeatManagerInterface {
+	return HeartBeatManager{
+		callState: callState,
+	}
+}
+
+func (hb HeartBeatManager) enableHeartbeat(data models.CallRequest) {
 	callSid := data.CallSid
 
 	logger.UuidLog("Info", callSid, fmt.Sprintf("enabling hearbeat first time,parent call sid is %s ", callSid))
-	parentSidRelationKey := fmt.Sprintf("parent:%s",data.ParentCallSid)
-	if err := MsCB.Cs.AddSetMember(parentSidRelationKey, callSid); err != nil {
+	parentSidRelationKey := fmt.Sprintf("parent:%s", data.ParentCallSid)
+	if err := hb.callState.AddSetMember(parentSidRelationKey, callSid); err != nil {
 		logger.UuidLog("Err", callSid, fmt.Sprintf("Trouble while setting up child "+
 			"and parent relationship in redis - %#v\n", err))
 	}
@@ -26,13 +43,13 @@ func enableHeartbeat(data models.CallRequest) {
 	if err := MsAdapter.EnableSessionHeartBeat(callSid, "1"); err != nil {
 		logger.UuidLog("Err", callSid, fmt.Sprintf("Trouble while enabling session heartbeat - %#v\n", err))
 	}
-	go sendHeartBeat(accId, callSid, rate, pulse)
+	go hb.sendHeartBeat(accId, callSid, rate, pulse)
 }
 
-func makeHeartBeatRequest(callSid string, heartbeatCount int64) error {
-	msg := fmt.Sprintf("heartbeat count is %d",heartbeatCount)
+func (hb HeartBeatManager) makeHeartBeatRequest(callSid string, heartbeatCount int64) error {
+	msg := fmt.Sprintf("heartbeat count is %d", heartbeatCount)
 	logger.UuidLog("Info", callSid, msg)
-	val, err := MsCB.Cs.Get(callSid)
+	val, err := hb.callState.Get(callSid)
 	if err == nil {
 		/* Get answer url and its method */
 		var data models.CallRequest
@@ -43,17 +60,17 @@ func makeHeartBeatRequest(callSid string, heartbeatCount int64) error {
 		rate := data.Rate
 		pulse := data.Pulse
 		accId := data.AccountSid
-		if heartbeatCount >= pulse{
-			go sendHeartBeat(accId, callSid, rate, pulse)
-			parentSidRelationKey := fmt.Sprintf("parent:%s",data.ParentCallSid)
-			_, _ = MsCB.Cs.IncrKeyMemberScore(parentSidRelationKey, callSid, -int(pulse))
+		if heartbeatCount >= pulse {
+			go hb.sendHeartBeat(accId, callSid, rate, pulse)
+			parentSidRelationKey := fmt.Sprintf("parent:%s", data.ParentCallSid)
+			_, _ = hb.callState.IncrKeyMemberScore(parentSidRelationKey, callSid, -int(pulse))
 			//reset the score here
 		}
 	}
 	return nil
 }
 
-func sendHeartBeat(accId string, callSid string, rate float64, duration int64) {
+func (hb HeartBeatManager) sendHeartBeat(accId string, callSid string, rate float64, duration int64) {
 	dataMap := make(map[string]interface{})
 
 	hearBeatUrl := fmt.Sprintf("%s/%s/Heartbeat/%s", config.Config.Heartbeat.BaseUrl, accId, callSid)
@@ -78,7 +95,7 @@ func sendHeartBeat(accId string, callSid string, rate float64, duration int64) {
 	logger.UuidLog("Info", callSid, fmt.Sprint("heartbeat request before post - ", dataMap,
 		" heartbeat url - ", hearBeatUrl))
 
-	statusCode, _, err := helper.Post(callSid,dataMap, hearBeatUrl)
+	statusCode, _, err := helper.Post(callSid, dataMap, hearBeatUrl)
 	if err != nil {
 		logger.UuidLog("Err", callSid, fmt.Sprint("send heartbeat failed - ", err))
 	} else if statusCode != 200 {

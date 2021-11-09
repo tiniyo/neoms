@@ -4,9 +4,9 @@ import (
 	"context"
 	"fmt"
 	"github.com/go-redis/redis/v8"
-	"github.com/neoms/adapters"
-	"github.com/neoms/config"
-	"github.com/neoms/logger"
+	"github.com/tiniyo/neoms/adapters"
+	"github.com/tiniyo/neoms/config"
+	"github.com/tiniyo/neoms/logger"
 	"time"
 )
 

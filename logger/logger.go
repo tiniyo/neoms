@@ -8,7 +8,7 @@ import (
 	logrus_syslog "github.com/sirupsen/logrus/hooks/syslog"
 	"log/syslog"
 	"os"
-	"github.com/neoms/config"
+	"github.com/tiniyo/neoms/config"
 	"strconv"
 )
 
@@ -32,6 +32,7 @@ func InitLogger() {
 	Logger, err = NewLogger(config.Config.Logging.Level, config.Config.Logging.Facility, config.Config.Logging.Tag,
 		config.Config.Logging.Sentry, config.Config.Logging.Syslog)
 	Logger.SetFormatter(&logrus.JSONFormatter{})
+	Logger.SetReportCaller(true)
 	if err != nil {
 		return
 	}

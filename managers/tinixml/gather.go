@@ -4,10 +4,10 @@ import (
 	"errors"
 	"fmt"
 	"github.com/beevik/etree"
-	"github.com/neoms/adapters"
-	"github.com/neoms/logger"
-	"github.com/neoms/managers/callstats"
-	"github.com/neoms/models"
+	"github.com/tiniyo/neoms/adapters"
+	"github.com/tiniyo/neoms/logger"
+	"github.com/tiniyo/neoms/managers/callstats"
+	"github.com/tiniyo/neoms/models"
 	"strconv"
 )
 

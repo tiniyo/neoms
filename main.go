@@ -1,9 +1,9 @@
 package main
 
 import (
-	"github.com/neoms/config"
-	"github.com/neoms/logger"
-	"github.com/neoms/server"
+	"github.com/tiniyo/neoms/config"
+	"github.com/tiniyo/neoms/logger"
+	"github.com/tiniyo/neoms/server"
 )
 
 /*

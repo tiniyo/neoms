@@ -2,8 +2,8 @@ package tinixml
 
 import (
 	"github.com/beevik/etree"
-	"github.com/neoms/adapters"
-	"github.com/neoms/logger"
+	"github.com/tiniyo/neoms/adapters"
+	"github.com/tiniyo/neoms/logger"
 )
 
 /*

@@ -1,13 +1,12 @@
 package config
 
 import (
-	"fmt"
 	"os"
 
 	"github.com/BurntSushi/toml"
 )
 
-/* TomlConfig represent the root of configuration */
+// TomlConfig represent the root of configuration
 type TomlConfig struct {
 	Title   string
 	Owner   Owner
@@ -16,6 +15,7 @@ type TomlConfig struct {
 	Fs      Freeswitch
 	Redis   Redis
 	Heartbeat Heartbeat
+	RecordingService RecordingService
 	Rating	Rating
 	Numbers Numbers
 	SipEndpoint SipEndpoint
@@ -23,6 +23,12 @@ type TomlConfig struct {
 }
 
 type Heartbeat struct {
+	BaseUrl string
+	UserName string
+	Secret string
+}
+
+type RecordingService struct {
 	BaseUrl string
 	UserName string
 	Secret string
@@ -50,6 +56,7 @@ type Kamgo struct {
 	UserName string
 	Secret string
 }
+
 /* Owner represent owner of the module*/
 type Owner struct {
 	Name string
@@ -96,11 +103,7 @@ func InitConfig() {
 		configFile = "/etc/config.toml"
 	}
 
-	fmt.Println("Config file is ", configFile)
-
 	if _, err = toml.DecodeFile(configFile, &Config); err != nil {
-		fmt.Println(err)
 		return
 	}
-	fmt.Println(Config)
 }

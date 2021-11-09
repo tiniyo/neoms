@@ -3,37 +3,29 @@ package managers
 import (
 	"fmt"
 	jsoniter "github.com/json-iterator/go"
-	"github.com/neoms/adapters"
-	"github.com/neoms/adapters/callstate"
-	"github.com/neoms/adapters/factory"
-	"github.com/neoms/logger"
+	"github.com/tiniyo/neoms/adapters"
+	"github.com/tiniyo/neoms/adapters/callstate"
+	"github.com/tiniyo/neoms/logger"
 )
 
 type CallBackManager struct {
-	cs adapters.CallStateAdapter
+	callState    adapters.CallStateAdapter
+	voiceAppMgr  VoiceAppManagerInterface
+	heartBeatMgr HeartBeatManagerInterface
+	webhookMgr   WebHookManagerInterface
 }
-
-type MediaServerCallBackHandler struct {
-	Cs adapters.CallStateAdapter
-}
-
-var MsCB = new(MediaServerCallBackHandler)
 
 var json = jsoniter.ConfigCompatibleWithStandardLibrary
 
-var MsCallBackAdapter adapters.MediaServer
-
-func (cm *CallBackManager) InitCallBackManager() {
-	var err error
-	cm.cs, err = callstate.NewCallStateAdapter()
-	if err == nil {
-		MsCB.Cs = cm.cs
-	}
-	MsCallBackAdapter = factory.GetMSInstance()
-	_ = MsCallBackAdapter.InitializeCallbackMediaServers(MsCB)
+func (msCB *CallBackManager) InitCallBackManager() {
+	msCB.callState, _ = callstate.NewCallStateAdapter()
+	msCB.voiceAppMgr = NewVoiceAppManager()
+	msCB.heartBeatMgr = NewHeartBeatManager(msCB.callState)
+	xmlMgr := NewXmlManager(msCB.callState)
+	msCB.webhookMgr = NewWebHookManager(msCB.callState, msCB.heartBeatMgr, xmlMgr)
 }
 
-func (msCB MediaServerCallBackHandler) CallBackMediaServerStatus(status int) error {
+func (msCB CallBackManager) CallBackMediaServerStatus(status int) error {
 	if status > 0 {
 		logger.Logger.Info(" MediaServer is Running ")
 	} else {
@@ -42,66 +34,89 @@ func (msCB MediaServerCallBackHandler) CallBackMediaServerStatus(status int) err
 	return nil
 }
 
-func (msCB MediaServerCallBackHandler) CallBackOriginate(callSid string, evHeader []byte) error {
+func (msCB CallBackManager) CallBackOriginate(callSid string, evHeader []byte) error {
 	logger.UuidLog("Info", callSid, "call initiated callback")
-	go triggerCallBack("initiated", callSid, evHeader)
-	return nil
+	err := msCB.webhookMgr.triggerCallBack("initiated", callSid, evHeader)
+	if err != nil {
+		logger.UuidLog("Err", callSid, fmt.Sprint("call initiated callback failed - ", err))
+	}
+	return err
 }
 
-func (msCB MediaServerCallBackHandler) CallBackProgressMedia(callSid string, evHeader []byte) error {
+func (msCB CallBackManager) CallBackProgressMedia(callSid string, evHeader []byte) error {
 	logger.UuidLog("Info", callSid, "call ringing callback")
-	go triggerCallBack("ringing", callSid, evHeader)
+	err := msCB.webhookMgr.triggerCallBack("ringing", callSid, evHeader)
+	if err != nil {
+		logger.UuidLog("Err", callSid, fmt.Sprint("call ringing callback failed - ", err))
+	}
+	return err
+}
+
+func (msCB CallBackManager) CallBackHangup(uuid string) error {
+	//logger.Logger.WithField("uuid", uuid).Info("callback hangup received")
 	return nil
 }
 
-func (msCB MediaServerCallBackHandler) CallBackHangup(uuid string) error {
-	logger.Logger.WithField("uuid", uuid).Info("callback hangup received")
-	return nil
-}
-
-func (msCB MediaServerCallBackHandler) CallBackHangupComplete(callSid string, evHeader []byte) error {
+func (msCB CallBackManager) CallBackHangupComplete(callSid string, evHeader []byte) error {
 	logger.UuidLog("Info", callSid, "callback hangup complete")
-	return triggerCallBack("completed", callSid, evHeader)
+	err := msCB.webhookMgr.triggerCallBack("completed", callSid, evHeader)
+	if err != nil {
+		logger.UuidLog("Err", callSid, fmt.Sprint("call hangup complete callback failed - ", err))
+	}
+	return err
 }
 
-func (msCB MediaServerCallBackHandler) CallBackAnswered(callSid string, evHeader []byte) error {
+func (msCB CallBackManager) CallBackAnswered(callSid string, evHeader []byte) error {
 	logger.UuidLog("Info", callSid, "call answer callback")
-	go triggerCallBack("answered", callSid, evHeader)
-	return nil
+	err := msCB.webhookMgr.triggerCallBack("answered", callSid, evHeader)
+	if err != nil {
+		logger.UuidLog("Err", callSid, fmt.Sprint("call answer callback failed - ", err))
+	}
+	return err
 }
 
-func (msCB MediaServerCallBackHandler) CallBackDTMFDetected(callSid string, evHeader []byte) error {
+func (msCB CallBackManager) CallBackDTMFDetected(callSid string, evHeader []byte) error {
 	dtmfMap := make(map[string]string)
 	if err := json.Unmarshal(evHeader, &dtmfMap); err != nil {
 		return err
 	}
 	callSid = dtmfMap["Unique-Id"]
 	logger.UuidLog("Info", callSid, fmt.Sprint("dtmf detected - ", dtmfMap["Dtmf-Digit"]))
-	go triggerDTMFCallBack(callSid, dtmfMap["Dtmf-Digit"])
-	return nil
+	err := msCB.webhookMgr.triggerDTMFCallBack(callSid, dtmfMap["Dtmf-Digit"])
+	if err != nil {
+		logger.UuidLog("Err", callSid, fmt.Sprint("call dtmf callback failed - ", err))
+	}
+	return err
 }
 
-func (msCB MediaServerCallBackHandler) CallBackRecordingStart(callSid string, evHeader []byte) error {
+func (msCB CallBackManager) CallBackRecordingStart(callSid string, evHeader []byte) error {
 	logger.Logger.WithField("uuid", callSid).Info("callback start recording received")
-	go triggerRecordingCallBack("in-progress", callSid, evHeader)
-	return nil
+	err := msCB.webhookMgr.triggerRecordingCallBack("in-progress", callSid, evHeader)
+	if err != nil {
+		logger.UuidLog("Err", callSid, fmt.Sprint("call record start callback failed - ", err))
+	}
+	return err
 }
 
-func (msCB MediaServerCallBackHandler) CallBackRecordingStop(callSid string, evHeader []byte) error {
-	logger.Logger.WithField("uuid", callSid).Info("callback start recording received")
-	go triggerRecordingCallBack("completed", callSid, evHeader)
-	return nil
+func (msCB CallBackManager) CallBackRecordingStop(callSid string, evHeader []byte) error {
+	logger.Logger.WithField("uuid", callSid).Info("callback stop recording received")
+	go postRecordingData(callSid, evHeader)
+	err := msCB.webhookMgr.triggerRecordingCallBack("completed", callSid, evHeader)
+	if err != nil {
+		logger.UuidLog("Err", callSid, fmt.Sprint("call record stop callback failed - ", err))
+	}
+	return err
 }
 
-func (msCB MediaServerCallBackHandler) CallBackProgress(callSid string) error {
-	logger.Logger.WithField("uuid", callSid).Info("callback progress received")
+func (msCB CallBackManager) CallBackProgress(callSid string) error {
+	//	logger.Logger.WithField("uuid", callSid).Info("callback progress received")
 	return nil
 }
 
 /*
 	Getting Park Events - Its useful to get the parked inbound call control from mediaserver to webfs
 */
-func (msCB MediaServerCallBackHandler) CallBackPark(callSid string, evHeader []byte) error {
+func (msCB CallBackManager) CallBackPark(callSid string, evHeader []byte) error {
 	logger.UuidLog("Info", callSid, "channel park callback")
 	evHeaderMap := make(map[string]string)
 
@@ -110,18 +125,16 @@ func (msCB MediaServerCallBackHandler) CallBackPark(callSid string, evHeader []b
 			err, " sending UNALLOCATED_NUMBER"))
 		return nil
 	}
-	destType := evHeaderMap["Variable_tiniyo_destination"]
 
+	destType := evHeaderMap["Variable_tiniyo_destination"]
 	switch destType {
 	case "InboundXMLApp":
 		logger.UuidInboundLog("Info", callSid, "inbound call received")
-		callRequest := getXMLApplication(evHeaderMap)
+		callRequest := msCB.voiceAppMgr.getXMLApplication(evHeaderMap)
 		if callRequest == nil {
 			logger.UuidInboundLog("Err", callSid, "not able to process the request, sending UNALLOCATED_NUMBER")
 			return MsAdapter.CallHangupWithReason(callSid, "UNALLOCATED_NUMBER")
 		}
-
-		logger.UuidInboundLog("Info", callSid, fmt.Sprintf("callRequest: %#v\n", callRequest))
 
 		/* Store Call State */
 		jsonCallRequestByte, err := json.Marshal(callRequest)
@@ -129,68 +142,81 @@ func (msCB MediaServerCallBackHandler) CallBackPark(callSid string, evHeader []b
 			logger.UuidInboundLog("Err", callSid, "not able to process the request, sending UNALLOCATED_NUMBER")
 			return MsAdapter.CallHangupWithReason(callSid, "UNALLOCATED_NUMBER")
 		}
-		if err = MsCB.Cs.Set(callRequest.Sid, jsonCallRequestByte); err != nil {
+		if err = msCB.callState.Set(callRequest.Sid, jsonCallRequestByte); err != nil {
 			logger.UuidInboundLog("Err", callSid, "not able to process the request, sending UNALLOCATED_NUMBER")
 			return MsAdapter.CallHangupWithReason(callSid, "UNALLOCATED_NUMBER")
 		}
-		go triggerCallBack("initiated", callSid, evHeader)
-		return nil
+
+		err = msCB.webhookMgr.triggerCallBack("initiated", callSid, evHeader)
+		if err != nil {
+			logger.UuidInboundLog("Err", callSid, fmt.Sprint("error while sending initiated callback - ", err))
+		}
+		return err
 	case "Conf":
 		authId := evHeaderMap["Variable_sip_h_x-tiniyo-authid"]
 		confId := evHeaderMap["Variable_sip_h_x-tiniyo-conf"]
 		confName := fmt.Sprintf("%s-%s@tiniyo+flags{moderator}", authId, confId)
 		confBridgeCmd := fmt.Sprintf("%s", confName)
-		_ = MsAdapter.ConfBridge(callSid, confBridgeCmd)
+		err := MsAdapter.ConfBridge(callSid, confBridgeCmd)
+		if err != nil {
+			return err
+		}
 	default:
-
+		logger.UuidInboundLog("Info", callSid, "inbound call received")
 	}
 	return nil
 }
 
-func (msCB MediaServerCallBackHandler) CallBackDestroy(uuid string) error {
-	logger.Logger.Debug("CallDestroy Value :  uuid ", uuid)
+func (msCB CallBackManager) CallBackDestroy(uuid string) error {
+	//logger.Logger.Debug("CallDestroy Value :  uuid ", uuid)
 	return nil
 }
 
-func (msCB MediaServerCallBackHandler) CallBackExecuteComplete(uuid string) error {
-	logger.Logger.Debug("CallExecuteComplete Value :  uuid ", uuid)
+func (msCB CallBackManager) CallBackExecuteComplete(uuid string) error {
+	//logger.Logger.Debug("CallExecuteComplete Value :  uuid ", uuid)
 	return nil
 }
 
-func (msCB MediaServerCallBackHandler) CallBackBridged(callSid string) error {
-	logger.Logger.WithField("callSid", callSid).Debug(" CallBackBridged  - ")
+func (msCB CallBackManager) CallBackBridged(callSid string) error {
+	//logger.Logger.WithField("callSid", callSid).Debug(" CallBackBridged  - ")
 	return nil
 }
 
-func (msCB MediaServerCallBackHandler) CallBackUnBridged(callSid string) error {
-	logger.Logger.WithField("uuid", callSid).Debug(" CallBackUnBridged  - ")
+func (msCB CallBackManager) CallBackUnBridged(callSid string) error {
+	//logger.Logger.WithField("uuid", callSid).Debug(" CallBackUnBridged  - ")
 	return nil
 }
 
-func (msCB MediaServerCallBackHandler) CallBackSessionHeartBeat(parentSid, callSid string) error {
+func (msCB CallBackManager) CallBackSessionHeartBeat(parentSid, callSid string) error {
 	logger.Logger.WithField("uuid", callSid).
 		WithField("parent", parentSid).Debug(" CallBackSessionHeartBeat  - ")
+	var callIds map[string]int64
+	var err error
 	parentSidRelationKey := fmt.Sprintf("parent:%s", parentSid)
-	if callIds, err := MsCB.Cs.GetMembersScore(parentSidRelationKey); err != nil {
+	if callIds, err = msCB.callState.GetMembersScore(parentSidRelationKey); err != nil {
 		logger.UuidLog("Err", callSid, fmt.Sprintf("Trouble while getting up child "+
 			"and parent relationship in redis - %#v\n", err))
-	} else {
-		for callId, Score := range callIds {
-			logger.Logger.WithField("uuid", callSid).
-				WithField("parent", parentSid).Debug(" Sending heartbeat  - ")
-			_, _ = MsCB.Cs.IncrKeyMemberScore(parentSidRelationKey, callId, 1)
-			go makeHeartBeatRequest(callId, Score+1)
+		return err
+	}
+	for callId, Score := range callIds {
+		logger.UuidLog("Err", callSid, fmt.Sprintf("sending heartbeat"))
+		if _, err = msCB.callState.IncrKeyMemberScore(parentSidRelationKey, callId, 1); err!=nil{
+			//handle it later
+		}
+		err = msCB.heartBeatMgr.makeHeartBeatRequest(callId, Score+1)
+		if err != nil {
+			return err
 		}
 	}
 	return nil
 }
 
-func (msCB MediaServerCallBackHandler) CallBackMessage(callSid string) error {
-	logger.Logger.WithField("uuid", callSid).Debug(" CallBackMessage  - ")
+func (msCB CallBackManager) CallBackMessage(callSid string) error {
+	//logger.Logger.WithField("uuid", callSid).Debug(" CallBackMessage  - ")
 	return nil
 }
 
-func (msCB MediaServerCallBackHandler) CallBackCustom(callSid string) error {
-	logger.Logger.WithField("uuid", callSid).Debug(" CallBackCustom  - ")
+func (msCB CallBackManager) CallBackCustom(callSid string) error {
+	//logger.Logger.WithField("uuid", callSid).Debug(" CallBackCustom  - ")
 	return nil
 }

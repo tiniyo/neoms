@@ -1,8 +1,8 @@
 package factory
 
 import (
-	"github.com/neoms/adapters"
-	"github.com/neoms/adapters/mediaserver"
+	"github.com/tiniyo/neoms/adapters"
+	"github.com/tiniyo/neoms/adapters/mediaserver"
 	"log"
 	"sync"
 	"sync/atomic"

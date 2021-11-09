@@ -1,4 +1,4 @@
-def CONTAINER_NAME="webfs"
+def CONTAINER_NAME="neoms"
 def CONTAINER_TAG="latest"
 node {
 

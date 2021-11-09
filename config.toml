@@ -1,10 +1,10 @@
 
-title = "webfs service configuration"
+title = "NeoMs service configuration"
 
 [owner]
-name = "Tiniyo"
+name = "Komal Patel"
 organization = "Tiniyo"
-bio = "support@tiniyo.com"
+bio = "Founder"
 
 [server]
 port = ":9092"
@@ -15,7 +15,7 @@ ginmode = "debug"
 [logging]
 facility = "local1"
 level = "debug"
-tag = "webfs"
+tag = "NeoMs"
 syslog = "127.0.0.1:514"
 
 [fs]
@@ -24,9 +24,39 @@ fsport = "8021"
 fspassword = "Tiniyo1234"
 fstimeout = 10
 
+[heartbeat]
+baseurl = "<HEARTBEAT_SERVICE>"
+username = "<PRIV_USER>"
+secret = "<PRIV_SECRET>"
+
+[rating]
+baseurl = "<RATE_ROUTE_SERVICE>"
+username = "<PRIV_USER>"
+secret = "<PRIV_SECRET>"
+region = "<REGION>"
+
+[numbers]
+baseurl = "<NUMBER_SERVICE>"
+username = "<PRIV_USER>"
+secret = "<PRIV_SECRET>"
+
+[sipendpoint]
+baseurl = "<SIP_SERVICE>"
+username = "<PRIV_USER>"
+secret = "<PRIV_SECRET>"
+
+[kamgo]
+baseurl = "<KAMGO_SERVICE>"
+username = "<PRIV_USER>"
+secret = "<PRIV_SECRET>"
+
 [redis]
 redishost = "redis"
 redisport = "6379"
 redispassword = ""
 redisdb = 0
 
+[recordingservice]
+baseurl = "<RECORDING_SERVICE>"
+username = "<PRIV_USER>"
+secret = "<PRIV_SECRET>"

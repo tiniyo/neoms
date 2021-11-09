@@ -1,4 +1,4 @@
-module github.com/neoms
+module github.com/tiniyo/neoms
 
 go 1.15
 

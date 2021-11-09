@@ -68,6 +68,7 @@ type CallRequest struct {
 	DialSipAttr
 	DialNumberAttr
 	GatherAttr
+	DialConferenceAttr
 }
 
 type CallUpdateRequest struct {

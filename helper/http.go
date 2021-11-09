@@ -9,7 +9,7 @@ import (
 	"time"
 
 	"github.com/go-resty/resty/v2"
-	"github.com/neoms/logger"
+	"github.com/tiniyo/neoms/logger"
 )
 
 /*
@@ -36,6 +36,32 @@ func InitHttpConnPool() {
 	CreateHttpClientPool("gen")
 }
 
+func CreateHttpClientPool(clientType string) {
+	mutext.Lock()
+	for i := 0; i < maxsize; i++ {
+
+		switch clientType {
+		case "heartbeat":
+			connection := resty.New()
+			connection.SetBasicAuth("FAIVAYIEPHAHGAIKOLOH", "KO66!RWHFh>9J!~;oFCV[lPN0")
+			hbConnections = append(hbConnections, connection)
+		case "rateroute":
+			connection := resty.New()
+			connection.SetBasicAuth("FAIVAYIEPHAHGAIKOLOH", "KO66!RWHFh>9J!~;oFCV[lPN0")
+			rrConnections = append(rrConnections, connection)
+		case "sip":
+			connection := resty.New()
+			connection.SetBasicAuth("FAIVAYIEPHAHGAIKOLOH", "KO66!RWHFh>9J!~;oFCV[lPN0")
+			sipConnections = append(sipConnections, connection)
+		case "number":
+			connection := resty.New()
+			connection.SetBasicAuth("FAIVAYIEPHAHGAIKOLOH", "KO66!RWHFh>9J!~;oFCV[lPN0")
+			numberConnections = append(numberConnections, connection)
+		default:
+			connection := resty.New()
+			genConnections = append(genConnections, connection)
+		}
+	}
 	mutext.Unlock()
 }
 */
@@ -108,7 +134,7 @@ func Get(callSid string, restData map[string]interface{}, urls string) (int, []b
 	var clientType = getClientType(urls)
 	var restClient = getConnection2()
 	if clientType == "heartbeat" || clientType == "rateroute" || clientType == "sip" || clientType == "number" {
-		restClient.SetBasicAuth("FAIeewew232324", "KO66!RWHFh>9J!~;oFCV[lPN0")
+		restClient.SetBasicAuth("FAIVAYIEPHAHGAIKOLOH", "KO66!RWHFh>9J!~;oFCV[lPN0")
 	} else {
 		u, err := url.Parse(urls)
 		if err != nil {
@@ -162,8 +188,8 @@ func Get(callSid string, restData map[string]interface{}, urls string) (int, []b
 func Post(callSid string, restData map[string]interface{}, urls string) (int, []byte, error) {
 	var clientType = getClientType(urls)
 	var restClient = getConnection2()
-	if clientType == "heartbeat" || clientType == "rateroute" || clientType == "sip" || clientType == "number" {
-		restClient.SetBasicAuth("FGHGHGHGHGVDFDFD", "KO66!RWHFh>9J!~;oFCV[lPN0")
+	if clientType == "heartbeat" ||  clientType == "recording" || clientType == "rateroute" || clientType == "sip" || clientType == "number" {
+		restClient.SetBasicAuth("FAIVAYIEPHAHGAIKOLOH", "KO66!RWHFh>9J!~;oFCV[lPN0")
 	} else {
 		u, err := url.Parse(urls)
 		if err != nil {
@@ -217,6 +243,8 @@ func getClientType(url string) string {
 		clientType = "number"
 	} else if strings.Contains(url, "Sips") {
 		clientType = "sip"
+	} else if strings.Contains(url, "Recordings") {
+		clientType = "recording"
 	} else {
 		clientType = "generic"
 	}

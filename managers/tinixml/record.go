@@ -3,10 +3,11 @@ package tinixml
 import (
 	"fmt"
 	"github.com/beevik/etree"
+	uuid4 "github.com/satori/go.uuid"
 	"os"
-	"github.com/neoms/adapters"
-	"github.com/neoms/logger"
-	"github.com/neoms/models"
+	"github.com/tiniyo/neoms/adapters"
+	"github.com/tiniyo/neoms/logger"
+	"github.com/tiniyo/neoms/models"
 	"strconv"
 )
 
@@ -16,11 +17,13 @@ func ProcessRecord(msAdapter *adapters.MediaServer, data *models.CallRequest, ch
 	}
 	var err error
 	handleRecordAttribute(data, *child)
+	recordingSid := uuid4.NewV4().String()
+	recordMultiSet := fmt.Sprintf("^^:recording_sid=%s", recordingSid)
 	if data.RecordFinishOnKey != "" {
-		recordMultiSet := fmt.Sprintf("playback_terminators=%s", data.RecordFinishOnKey)
-		if err = (*msAdapter).Set(data.Sid, recordMultiSet); err != nil {
-			return err
-		}
+		recordMultiSet = fmt.Sprintf(":playback_terminators=%s", data.RecordFinishOnKey)
+	}
+	if err = (*msAdapter).MultiSet(data.Sid, recordMultiSet); err != nil {
+		return err
 	}
 	if data.RecordPlayBeep == "true" {
 		if err = (*msAdapter).PlayBeep(data.Sid); err != nil {

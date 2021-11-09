@@ -3,9 +3,9 @@ package webhooks
 import (
 	"fmt"
 	jsoniter "github.com/json-iterator/go"
-	"github.com/neoms/helper"
-	"github.com/neoms/logger"
-	"github.com/neoms/models"
+	"github.com/tiniyo/neoms/helper"
+	"github.com/tiniyo/neoms/logger"
+	"github.com/tiniyo/neoms/models"
 	"strings"
 )
 

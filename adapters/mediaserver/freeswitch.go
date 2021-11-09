@@ -7,9 +7,9 @@ import (
 	"time"
 
 	"github.com/fiorix/go-eventsocket/eventsocket"
-	"github.com/neoms/adapters"
-	"github.com/neoms/config"
-	"github.com/neoms/logger"
+	"github.com/tiniyo/neoms/adapters"
+	"github.com/tiniyo/neoms/config"
+	"github.com/tiniyo/neoms/logger"
 )
 
 /*
@@ -17,19 +17,17 @@ import (
 	one for getting events and another for sending commands
 */
 type MsFreeSWITCHGiz struct {
-	c  *eventsocket.Connection
-	c1 *eventsocket.Connection
+	fsConn *eventsocket.Connection
+	eventReceiver *eventsocket.Connection
 }
 
 const (
 	subEventList = "events text CHANNEL_PARK " +
-		"CHANNEL_DESTROY CHANNEL_EXECUTE_COMPLETE " +
-		"CHANNEL_HANGUP CHANNEL_UNBRIDGE " +
-		"CHANNEL_BRIDGE CHANNEL_ANSWER " +
+		"CHANNEL_ANSWER " +
 		"RECORD_START RECORD_STOP CHANNEL_ORIGINATE " +
-		"CHANNEL_PROGRESS CHANNEL_PROGRESS_MEDIA " +
-		"CHANNEL_HANGUP_COMPLETE DTMF SESSION_HEARTBEAT " +
-		"MESSAGE CUSTOM conference::maintenance"
+		"CHANNEL_PROGRESS_MEDIA " +
+		"CHANNEL_HANGUP_COMPLETE DTMF SESSION_HEARTBEAT"
+	//	"CUSTOM conference::maintenance"
 	freeSwitchReconnectTime = 5
 )
 
@@ -40,7 +38,10 @@ func connect(cb adapters.MediaServerCallbacker) (*eventsocket.Connection, error)
 	if err != nil {
 		logger.Logger.Error("FreeSWITCH Connection Failed - ", err)
 		if cb != nil {
-			cb.CallBackMediaServerStatus(0)
+			err = cb.CallBackMediaServerStatus(0)
+			if err != nil {
+				return nil, err
+			}
 		}
 		return c, err
 	}
@@ -56,7 +57,7 @@ func reconnect(cb adapters.MediaServerCallbacker) (*eventsocket.Connection, erro
 		c, err := connect(cb)
 		if err == nil {
 			logger.Logger.Error("FreeSWITCH Connection Success - ", err)
-			return c, err
+			return c, nil
 		}
 		time.Sleep(time.Second * freeSwitchReconnectTime)
 		logger.Logger.Info("Trying to reconnect to FreeSWITCH in 5 Seconds")
@@ -66,38 +67,63 @@ func reconnect(cb adapters.MediaServerCallbacker) (*eventsocket.Connection, erro
 func (fs *MsFreeSWITCHGiz) InitializeCallbackMediaServers(cb adapters.MediaServerCallbacker) error {
 	/* Spawn new thread as it will not stop execution during initialization */
 	go func() {
-		go fs.initializeEventCallbackConnection(cb)
+		//initialize callback connection
+		go func() {
+			err := fs.initializeEventCallbackConnection(cb)
+			if err != nil {
+				logger.Logger.Error("Initialize MediaServer Callback Connection Failed- ", err)
+			} else {
+				logger.Logger.Error("Initialize MediaServer Callback Connection Success- ", err)
+			}
+		}()
+
+		//initialize callback connection
 		var err error
-		fs.c, err = reconnect(cb)
+		fs.fsConn, err = reconnect(cb)
 		if err != nil {
-			logger.Logger.Error("Initialize Mediaserver Failed ", err)
+			logger.Logger.Error("Initialize MediaServer Failed ", err)
+		} else {
+			logger.Logger.Error("Initialize MediaServer success ", err)
 		}
+
 	}()
 	return nil
 }
 
 func (fs *MsFreeSWITCHGiz) initializeEventCallbackConnection(cb adapters.MediaServerCallbacker) error {
 	if cb == nil {
+		logger.Logger.Error("Initialize MediaServer Callback Connection Failed- callback is nil")
 		return nil
 	}
 	/* Spawn new thread as it will not stop execution during initialization */
 	go func() {
 		var err error
-		fs.c1, err = reconnect(cb)
-		if err != nil {
-			logger.Logger.Error("Initialize Mediaserver Failed ", err)
+		//infinite loop for connecting to freeswitch and subscribe to events
+		for {
+			fs.eventReceiver, err = reconnect(cb)
+			if err != nil {
+				logger.Logger.Error("Initialize MediaServer Failed ", err)
+				continue
+			}
+			_, err = fs.eventReceiver.Send(subEventList)
+			if err == nil {
+				logger.Logger.Error("Event subscribed to mediaserver", subEventList)
+				break
+			}
+			logger.Logger.Error("Initialize MediaServer Failed ", err)
 		}
-		fs.c1.Send(subEventList)
+
 		logger.Logger.Info("FreeSWITCH Connected, subscribed event list ", subEventList)
 		go fs.run(cb)
 	}()
 	return nil
 }
 
-func handleFreeSWITCHEvent(ev *eventsocket.Event, cb adapters.MediaServerCallbacker) {
+func (fs *MsFreeSWITCHGiz) handleFreeSWITCHEvent(ev *eventsocket.Event, cb adapters.MediaServerCallbacker) {
+	var err error
 	evName := ev.Get("Event-Name")
 	callSid := ev.Get("Variable_call_sid")
-	if callSid == ""{
+	if callSid == "" {
 		callSid = ev.Get("Unique-ID")
 	}
 	parentCallSid := ev.Get("Variable_parent_call_sid")
@@ -105,61 +131,53 @@ func handleFreeSWITCHEvent(ev *eventsocket.Event, cb adapters.MediaServerCallbac
 	evHeader, _ := json.Marshal(ev.Header)
 	switch evName {
 	case "CHANNEL_PARK":
-		cb.CallBackPark(callSid, evHeader)
-	case "CHANNEL_DESTROY":
-		cb.CallBackDestroy(callSid)
-	case "CHANNEL_EXECUTE_COMPLETE":
-		cb.CallBackExecuteComplete(callSid)
-	case "CHANNEL_HANGUP":
-		cb.CallBackHangup(callSid)
+		err = cb.CallBackPark(callSid, evHeader)
 	case "CHANNEL_HANGUP_COMPLETE":
-		cb.CallBackHangupComplete(callSid, evHeader)
-	case "CHANNEL_UNBRIDGE":
-		cb.CallBackUnBridged(callSid)
-	case "CHANNEL_BRIDGE":
-		cb.CallBackBridged(callSid)
+		err = cb.CallBackHangupComplete(callSid, evHeader)
 	case "CHANNEL_ANSWER":
-		cb.CallBackAnswered(callSid, evHeader)
-	case "CHANNEL_PROGRESS":
-		cb.CallBackProgress(callSid)
+		err = cb.CallBackAnswered(callSid, evHeader)
 	case "CHANNEL_PROGRESS_MEDIA":
-		cb.CallBackProgressMedia(callSid, evHeader)
+		err = cb.CallBackProgressMedia(callSid, evHeader)
 	case "SESSION_HEARTBEAT":
-		cb.CallBackSessionHeartBeat(parentCallSid, callSid)
+		err = cb.CallBackSessionHeartBeat(parentCallSid, callSid)
 	case "RECORD_START":
-		cb.CallBackRecordingStart(callSid, evHeader)
+		err = cb.CallBackRecordingStart(callSid, evHeader)
 	case "RECORD_STOP":
-		cb.CallBackRecordingStop(callSid, evHeader)
-	case "MESSAGE":
-		cb.CallBackMessage(callSid)
-	case "CUSTOM":
-		cb.CallBackCustom(callSid)
+		err = cb.CallBackRecordingStop(callSid, evHeader)
 	case "CHANNEL_ORIGINATE":
-		cb.CallBackOriginate(callSid, evHeader)
+		err = cb.CallBackOriginate(callSid, evHeader)
 	case "DTMF":
-		cb.CallBackDTMFDetected(callSid, evHeader)
+		err = cb.CallBackDTMFDetected(callSid, evHeader)
 	default:
 		logger.Logger.Debug("UniqueID : ", callSid, " Event Name : ", evName)
+		if err != nil {
+			logger.Logger.Error("Error while processing callback events", err)
+		}
 	}
 }
 
 func (fs *MsFreeSWITCHGiz) run(cb adapters.MediaServerCallbacker) {
 	for {
-		ev, err := fs.c1.ReadEvent()
+		ev, err := fs.eventReceiver.ReadEvent()
 		if err != nil {
-			logger.Logger.Error("FreeSWITCH ESL Read event failed ", err)
-			logger.Logger.Info("Reconnect to the FreeSWITCH again ")
-			go fs.InitializeCallbackMediaServers(cb)
+			logger.Logger.Error("FreeSWITCH ESL Read event failed - Need to debug here", err)
+			go func() {
+				logger.Logger.Info("Reconnect to the FreeSWITCH again ")
+				err = fs.InitializeCallbackMediaServers(cb)
+				if err != nil {
+					logger.Logger.Error("Error while processing callback events", err)
+				}
+			}()
 			break
 		}
-		go handleFreeSWITCHEvent(ev, cb)
+		go fs.handleFreeSWITCHEvent(ev, cb)
 	}
 }
 
 func (fs MsFreeSWITCHGiz) EnableSessionHeartBeat(uuid, interval string) error {
-	logger.Logger.Debug("EnableSessionHeartBeat : ", uuid)
+	logger.Logger.Debug("EnableSessionHeartBeat : ", uuid, "remote addres")
 	type MSG map[string]string
-	ev, err := fs.c.SendMsg(eventsocket.MSG{
+	ev, err := fs.fsConn.SendMsg(eventsocket.MSG{
 		"call-command":     "execute",
 		"execute-app-name": "enable_heartbeat",
 		"execute-app-arg":  interval,
@@ -174,7 +192,7 @@ func (fs MsFreeSWITCHGiz) EnableSessionHeartBeat(uuid, interval string) error {
 func (fs MsFreeSWITCHGiz) PreAnswerCall(uuid string) error {
 	logger.Logger.Debug("Pre Answer the call with : ", uuid)
 	type MSG map[string]string
-	_, err := fs.c.SendMsg(eventsocket.MSG{
+	_, err := fs.fsConn.SendMsg(eventsocket.MSG{
 		"call-command":     "execute",
 		"execute-app-name": "pre_answer",
 		"event-lock":       "true"}, uuid, "")
@@ -186,14 +204,14 @@ func (fs MsFreeSWITCHGiz) PreAnswerCall(uuid string) error {
 		This to make sure command should be relayed after ack is received
 		ack is expected with in 1 second else issues will be there
 	*/
-	time.Sleep(1*time.Second)
+	time.Sleep(1 * time.Second)
 	return nil
 }
 
 func (fs MsFreeSWITCHGiz) AnswerCall(uuid string) error {
 	logger.Logger.Debug("Answering the call with : ", uuid)
 	type MSG map[string]string
-	_, err := fs.c.SendMsg(eventsocket.MSG{
+	_, err := fs.fsConn.SendMsg(eventsocket.MSG{
 		"call-command":     "execute",
 		"execute-app-name": "answer",
 		"event-lock":       "true"}, uuid, "")
@@ -204,15 +222,15 @@ func (fs MsFreeSWITCHGiz) AnswerCall(uuid string) error {
 	/*
 		This to make sure command should be relayed after ack is received
 		ack is expected with in 1 second else issues will be there
-	 */
-	time.Sleep(1*time.Second)
+	*/
+	time.Sleep(1 * time.Second)
 	return nil
 }
 
 func (fs MsFreeSWITCHGiz) PlayMediaFile(uuid string, fileUrl string, loopCount string) error {
 	logger.Logger.Debug("PlayMediaFile : ", uuid, " FileURL: ", fileUrl)
 	type MSG map[string]string
-	_, err := fs.c.SendMsg(eventsocket.MSG{
+	_, err := fs.fsConn.SendMsg(eventsocket.MSG{
 		"call-command":     "execute",
 		"execute-app-name": "playback",
 		"execute-app-arg":  fileUrl,
@@ -227,7 +245,7 @@ func (fs MsFreeSWITCHGiz) PlayMediaFile(uuid string, fileUrl string, loopCount s
 
 func (fs MsFreeSWITCHGiz) PlayBeep(uuid string) error {
 	type MSG map[string]string
-	_, err := fs.c.SendMsg(eventsocket.MSG{
+	_, err := fs.fsConn.SendMsg(eventsocket.MSG{
 		"call-command":     "execute",
 		"execute-app-name": "playback",
 		"execute-app-arg":  "tone_stream://L=1;%(1850,1750,1000)",
@@ -242,7 +260,7 @@ func (fs MsFreeSWITCHGiz) PlayBeep(uuid string) error {
 func (fs MsFreeSWITCHGiz) Speak(uuid string, voiceId, text string) error {
 	args := fmt.Sprintf("polly|%s|%s", voiceId, text)
 	type MSG map[string]string
-	_, err := fs.c.SendMsg(eventsocket.MSG{
+	_, err := fs.fsConn.SendMsg(eventsocket.MSG{
 		"call-command":     "execute",
 		"execute-app-name": "speak",
 		"execute-app-arg":  args,
@@ -255,7 +273,7 @@ func (fs MsFreeSWITCHGiz) Speak(uuid string, voiceId, text string) error {
 }
 
 func (fs MsFreeSWITCHGiz) CallNewOutbound(cmd string) error {
-	_, err := fs.c.Send(cmd)
+	_, err := fs.fsConn.Send(cmd)
 	if err != nil {
 		logger.Logger.Error("Error while executing the new outbound command", err)
 		return err
@@ -263,10 +281,9 @@ func (fs MsFreeSWITCHGiz) CallNewOutbound(cmd string) error {
 	return nil
 }
 
-
 func (fs MsFreeSWITCHGiz) CallHangup(uuid string) error {
 	logger.Logger.Debug("Hangup : ", uuid)
-	_, err := fs.c.SendMsg(eventsocket.MSG{
+	_, err := fs.fsConn.SendMsg(eventsocket.MSG{
 		"call-command":     "execute",
 		"execute-app-name": "hangup",
 		"event-lock":       "true"}, uuid, "")
@@ -278,8 +295,12 @@ func (fs MsFreeSWITCHGiz) CallHangup(uuid string) error {
 }
 
 func (fs MsFreeSWITCHGiz) CallHangupWithSync(uuid string, reason string) error {
+	err := fs.PlayMediaFile(uuid, "silence_stream://2000", "1")
+	if err != nil {
+		//silence play failed
+	}
 	logger.Logger.Debug("Hangup : ", uuid)
-	ev, err := fs.c.SendMsg(eventsocket.MSG{
+	ev, err := fs.fsConn.SendMsg(eventsocket.MSG{
 		"call-command":     "execute",
 		"execute-app-name": "hangup",
 		"execute-app-arg":  reason,
@@ -289,8 +310,12 @@ func (fs MsFreeSWITCHGiz) CallHangupWithSync(uuid string, reason string) error {
 }
 
 func (fs MsFreeSWITCHGiz) CallHangupWithReason(uuid string, reason string) error {
+	err := fs.PlayMediaFile(uuid, "silence_stream://2000", "1")
+	if err != nil {
+		//silence play failed
+	}
 	logger.Logger.Debug("Hangup : ", uuid)
-	ev, err := fs.c.SendMsg(eventsocket.MSG{
+	ev, err := fs.fsConn.SendMsg(eventsocket.MSG{
 		"call-command":     "execute",
 		"execute-app-name": "hangup",
 		"execute-app-arg":  reason,
@@ -305,7 +330,7 @@ func (fs MsFreeSWITCHGiz) CallTransfer() error {
 
 func (fs MsFreeSWITCHGiz) CallSendDTMF(uuid string, dtmf string) error {
 	logger.Logger.Debug("SendDTMF  : ", uuid)
-	ev, err := fs.c.SendMsg(eventsocket.MSG{
+	ev, err := fs.fsConn.SendMsg(eventsocket.MSG{
 		"call-command":     "execute",
 		"execute-app-name": "send_dtmf",
 		"execute-app-arg":  dtmf,
@@ -319,7 +344,7 @@ func (fs MsFreeSWITCHGiz) CallSendDTMF(uuid string, dtmf string) error {
 
 func (fs MsFreeSWITCHGiz) CallReceiveDTMF(uuid string) error {
 	logger.Logger.Debug("ReceiveDTMF  : ", uuid)
-	ev, err := fs.c.Send(fmt.Sprintf("bgapi uuid_recv_dtmf %s %s", uuid))
+	ev, err := fs.fsConn.Send(fmt.Sprintf("bgapi uuid_recv_dtmf %s %s", uuid))
 	if err != nil {
 		return err
 	}
@@ -327,10 +352,9 @@ func (fs MsFreeSWITCHGiz) CallReceiveDTMF(uuid string) error {
 	return nil
 }
 
-
-func (fs MsFreeSWITCHGiz) BreakAllUuid(uuid string) error  {
+func (fs MsFreeSWITCHGiz) BreakAllUuid(uuid string) error {
 	logger.Logger.Debug("Break All Command to Uuid  : ", uuid)
-	ev, err := fs.c.Send(fmt.Sprintf("bgapi uuid_break %s all", uuid))
+	ev, err := fs.fsConn.Send(fmt.Sprintf("bgapi uuid_break %s all", uuid))
 	if err != nil {
 		return err
 	}
@@ -338,13 +362,12 @@ func (fs MsFreeSWITCHGiz) BreakAllUuid(uuid string) error  {
 	return nil
 }
 
-
-func (fs MsFreeSWITCHGiz) UuidQueueCount(uuid string) (bool,error)  {
-	ev, err := fs.c.Send(fmt.Sprintf("api uuid_queue_count %s", uuid))
+func (fs MsFreeSWITCHGiz) UuidQueueCount(uuid string) (bool, error) {
+	ev, err := fs.fsConn.Send(fmt.Sprintf("api uuid_queue_count %s", uuid))
 	if err != nil {
 		return false, err
 	}
-	if ev != nil && strings.HasPrefix(ev.Body,"+OK 0") {
+	if ev != nil && strings.HasPrefix(ev.Body, "+OK 0") {
 		return true, nil
 	}
 	return false, nil
@@ -352,7 +375,7 @@ func (fs MsFreeSWITCHGiz) UuidQueueCount(uuid string) (bool,error)  {
 
 func (fs MsFreeSWITCHGiz) CallBridge(uuid string, bridgeArgs string) error {
 	logger.Logger.Debug("Bridge : ", uuid, " And ", bridgeArgs)
-	ev, err := fs.c.SendMsg(eventsocket.MSG{
+	ev, err := fs.fsConn.SendMsg(eventsocket.MSG{
 		"call-command":     "execute",
 		"execute-app-name": "bridge",
 		"execute-app-arg":  bridgeArgs,
@@ -366,7 +389,7 @@ func (fs MsFreeSWITCHGiz) CallBridge(uuid string, bridgeArgs string) error {
 
 func (fs MsFreeSWITCHGiz) CallIntercept(uuid string, bridgeArgs string) error {
 	logger.Logger.Debug("Bridge : ", uuid, " And ", bridgeArgs)
-	ev, err := fs.c.SendMsg(eventsocket.MSG{
+	ev, err := fs.fsConn.SendMsg(eventsocket.MSG{
 		"call-command":     "execute",
 		"execute-app-name": "intercept",
 		"execute-app-arg":  bridgeArgs,
@@ -380,7 +403,7 @@ func (fs MsFreeSWITCHGiz) CallIntercept(uuid string, bridgeArgs string) error {
 
 func (fs MsFreeSWITCHGiz) SetRecordStereo(uuid string) error {
 	logger.Logger.Debug("SetRecordStereo : ", uuid)
-	ev, err := fs.c.SendMsg(eventsocket.MSG{
+	ev, err := fs.fsConn.SendMsg(eventsocket.MSG{
 		"call-command":     "execute",
 		"execute-app-name": "set",
 		"execute-app-arg":  "RECORD_STEREO=true",
@@ -391,7 +414,7 @@ func (fs MsFreeSWITCHGiz) SetRecordStereo(uuid string) error {
 
 func (fs MsFreeSWITCHGiz) Set(uuid, value string) error {
 	logger.Logger.Debug("Set Variable : ", uuid)
-	ev, err := fs.c.SendMsg(eventsocket.MSG{
+	ev, err := fs.fsConn.SendMsg(eventsocket.MSG{
 		"call-command":     "execute",
 		"execute-app-name": "set",
 		"execute-app-arg":  value,
@@ -405,7 +428,7 @@ func (fs MsFreeSWITCHGiz) Set(uuid, value string) error {
 
 func (fs MsFreeSWITCHGiz) MultiSet(uuid, value string) error {
 	logger.Logger.Debug("Set Variable : ", uuid)
-	ev, err := fs.c.SendMsg(eventsocket.MSG{
+	ev, err := fs.fsConn.SendMsg(eventsocket.MSG{
 		"call-command":     "execute",
 		"execute-app-name": "multiset",
 		"execute-app-arg":  value,
@@ -418,7 +441,7 @@ func (fs MsFreeSWITCHGiz) MultiSet(uuid, value string) error {
 }
 
 func (fs MsFreeSWITCHGiz) CallRecord(uuid string, recordFile string) error {
-	ev, err := fs.c.SendMsg(eventsocket.MSG{
+	ev, err := fs.fsConn.SendMsg(eventsocket.MSG{
 		"call-command":     "execute",
 		"execute-app-name": "record_session",
 		"execute-app-arg":  recordFile,
@@ -430,12 +453,12 @@ func (fs MsFreeSWITCHGiz) CallRecord(uuid string, recordFile string) error {
 	return nil
 }
 
-func (fs MsFreeSWITCHGiz) Record(uuid string, recordFile string,maxDuration string, silenceSeconds string) error {
-	recordString := fmt.Sprintf("%s %s 40 %s",recordFile,maxDuration,silenceSeconds)
-	if silenceSeconds == "0"{
-		recordString = fmt.Sprintf("'%s %s'",recordFile,maxDuration)
+func (fs MsFreeSWITCHGiz) Record(uuid string, recordFile string, maxDuration string, silenceSeconds string) error {
+	recordString := fmt.Sprintf("%s %s 40 %s", recordFile, maxDuration, silenceSeconds)
+	if silenceSeconds == "0" {
+		recordString = fmt.Sprintf("'%s %s'", recordFile, maxDuration)
 	}
-	ev, err := fs.c.SendMsg(eventsocket.MSG{
+	ev, err := fs.fsConn.SendMsg(eventsocket.MSG{
 		"call-command":     "execute",
 		"execute-app-name": "record",
 		"execute-app-arg":  recordString,
@@ -447,11 +470,10 @@ func (fs MsFreeSWITCHGiz) Record(uuid string, recordFile string,maxDuration stri
 	return nil
 }
 
-
 //Conference
 func (fs MsFreeSWITCHGiz) ConfCreate(uuid, conferenceName string) error {
 	logger.Logger.Debug("Conference : ", uuid, " And ", conferenceName)
-	ev, err := fs.c.SendMsg(eventsocket.MSG{
+	ev, err := fs.fsConn.SendMsg(eventsocket.MSG{
 		"call-command":     "execute",
 		"execute-app-name": "conference",
 		"execute-app-arg":  conferenceName,
@@ -466,7 +488,7 @@ func (fs MsFreeSWITCHGiz) ConfCreate(uuid, conferenceName string) error {
 //ConferenceBridge
 func (fs MsFreeSWITCHGiz) ConfBridge(uuid, bridgeArgs string) error {
 	logger.Logger.Debug("Bridge : ", uuid, " And ", bridgeArgs)
-	ev, err := fs.c.SendMsg(eventsocket.MSG{
+	ev, err := fs.fsConn.SendMsg(eventsocket.MSG{
 		"call-command":     "execute",
 		"execute-app-name": "conference",
 		"execute-app-arg":  bridgeArgs,
@@ -481,7 +503,7 @@ func (fs MsFreeSWITCHGiz) ConfBridge(uuid, bridgeArgs string) error {
 //ConferenceBridge
 func (fs MsFreeSWITCHGiz) ConfSetAutoCall(uuid, bridgeArgs string) error {
 	logger.Logger.Debug("ConfSetAutoCall : ", uuid, " And ", bridgeArgs)
-	ev, err := fs.c.SendMsg(eventsocket.MSG{
+	ev, err := fs.fsConn.SendMsg(eventsocket.MSG{
 		"call-command":     "execute",
 		"execute-app-name": "conference_set_auto_outcall",
 		"execute-app-arg":  bridgeArgs,
@@ -500,3 +522,8 @@ func (fs MsFreeSWITCHGiz) ConfAddMember() error {
 func (fs MsFreeSWITCHGiz) ConfRemoveMember() error {
 	return nil
 }
+
+/*
+	connection pool for freeswitch but we need to make sure one call will use same connection
+
+*/

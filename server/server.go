@@ -2,7 +2,7 @@ package server
 
 import (
 	"github.com/gin-gonic/gin"
-	"github.com/neoms/config"
+	"github.com/tiniyo/neoms/config"
 )
 
 func Init() {

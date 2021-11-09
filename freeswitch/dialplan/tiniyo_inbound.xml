@@ -36,6 +36,7 @@
                 <action application="log" data="INFO Inbound call CallUUID ${call_uuid} SIPCallID ${sip_call_id}- from ${caller_id_number} to ${destination_number}" />
                 <action application="set" data="sip_ignore_183nosdp=true" />
                 <action application="set" data="tiniyo_destination=InboundXMLApp"/>
+                <action application="set" data="sip_user=${sip_h_X-User}"/>
                 <action application="set" data="rtp_use_dtls=false" />
                 <action application="set" data="webrtc_enable_dtls=true" />
                 <action application="set" data="call_type=Sip"/>

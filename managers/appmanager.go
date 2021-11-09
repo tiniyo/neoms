@@ -3,18 +3,35 @@ package managers
 import (
 	"fmt"
 	"regexp"
-	"github.com/neoms/config"
-	"github.com/neoms/helper"
-	"github.com/neoms/logger"
-	"github.com/neoms/managers/callstats"
-	"github.com/neoms/models"
+	"github.com/tiniyo/neoms/constant"
+
+	"github.com/tiniyo/neoms/config"
+	"github.com/tiniyo/neoms/helper"
+	"github.com/tiniyo/neoms/logger"
+	"github.com/tiniyo/neoms/models"
 )
 
-func getXMLApplication(evHeaderMap map[string]string) *models.CallRequest {
+type VoiceAppManagerInterface interface {
+	getXMLApplication(evHeaderMap map[string]string) *models.CallRequest
+}
+
+type VoiceAppManager struct {
+
+}
+
+func NewVoiceAppManager() VoiceAppManagerInterface {
+	return VoiceAppManager{
+	}
+}
+
+func (vAppMgr VoiceAppManager) getXMLApplication(evHeaderMap map[string]string) *models.CallRequest {
 
 	var data models.NumberAPIResponse
 	phoneNumber := evHeaderMap["Variable_sip_req_user"]
 	toPhoneNumber := evHeaderMap["Variable_sip_to_user"]
+	if phoneNumber == "" {
+		phoneNumber = toPhoneNumber
+	}
 	callType := evHeaderMap["Variable_call_type"]
 	callSid := evHeaderMap["Variable_call_sid"]
 	callerId := evHeaderMap["Variable_sip_from_user"]
@@ -22,50 +39,40 @@ func getXMLApplication(evHeaderMap map[string]string) *models.CallRequest {
 	sipUser := evHeaderMap["Variable_sip_user"]
 	parentCallSid := callSid
 	url := ""
-	key := phoneNumber
 
-	if value := callstats.GetLocalCache(key); value != nil {
-		data = value.(models.NumberAPIResponse)
+	if callType == "number" {
+		logger.UuidInboundLog("Info", callSid, fmt.Sprint("sip call received on did number"))
+		url = fmt.Sprintf("%s/%s", config.Config.Numbers.BaseUrl, numberSanity(phoneNumber))
+	} else if callType == "number_tata" {
+		logger.UuidInboundLog("Info", callSid, fmt.Sprint("sip call received on did number"))
+		url = fmt.Sprintf("%s/%s", config.Config.Numbers.BaseUrl, numberSanity(toPhoneNumber))
+		callType = "number"
 	} else {
+		logger.UuidInboundLog("Info", callSid, fmt.Sprint("sip call received from sip user :", callType, " ", sipUser))
+		url = fmt.Sprintf("%s/Endpoints/%s", config.Config.SipEndpoint.BaseUrl, sipUser)
+		fromUser = sipUser
+		//callType = "sip"
+	}
 
-		if callType == "number" {
-			logger.UuidInboundLog("Info", callSid, fmt.Sprint("sip call received on did number"))
-			url = fmt.Sprintf("%s/%s", config.Config.Numbers.BaseUrl, numberSanity(phoneNumber))
-		} else if callType == "number_tata" {
-			logger.UuidInboundLog("Info", callSid, fmt.Sprint("sip call received on did number"))
-			url = fmt.Sprintf("%s/%s", config.Config.Numbers.BaseUrl, numberSanity(toPhoneNumber))
-			callType = "number"
-			key = toPhoneNumber
-		} else {
-			logger.UuidInboundLog("Info", callSid, fmt.Sprint("sip call received from sip user"))
-			url = fmt.Sprintf("%s/Endpoints/%s", config.Config.SipEndpoint.BaseUrl, sipUser)
-			key = sipUser
-			fromUser = sipUser
-			callType = "sip"
-		}
+	if callType == "Wss" || callType == "wss" || callType == "Ws" {
+		callType = "wss"
+	} else {
+		callType = "sip"
+	}
 
-		if callType == "Wss" || callType == "wss" || callType == "Ws" {
-			callType = "wss"
-		} else if callType == "Sip" || callType == "sip" {
-			callType = "sip"
-		}
+	logger.UuidInboundLog("Info", callSid, fmt.Sprint("get application url - ", url))
 
-		logger.UuidInboundLog("Info", callSid, fmt.Sprint("get application url - ", url))
-
-		statusCode, respBody, err := helper.Get(callSid, nil, url)
-		if err != nil || statusCode != 200 {
-			logger.UuidInboundLog("Err", callSid, fmt.Sprintf("url for response status code is  %d - %#v",
-				statusCode, err))
-			return nil
-		}
-		logger.UuidInboundLog("Info", callSid, fmt.Sprintf("get application response - %s", string(respBody)))
-		err = json.Unmarshal(respBody, &data)
-		if err != nil {
-			logger.UuidInboundLog("Err", callSid, fmt.Sprintf("unmarshal application json failed, rejecting the calls %#v", err))
-			return nil
-		}
-
-		callstats.SetLocalCache(key, data)
+	statusCode, respBody, err := helper.Get(callSid, nil, url)
+	if err != nil || statusCode != 200 {
+		logger.UuidInboundLog("Err", callSid, fmt.Sprintf("url for response status code is  %d - %#v",
+			statusCode, err))
+		return nil
+	}
+	logger.UuidInboundLog("Info", callSid, fmt.Sprintf("get application response - %s", string(respBody)))
+	err = json.Unmarshal(respBody, &data)
+	if err != nil {
+		logger.UuidInboundLog("Err", callSid, fmt.Sprintf("unmarshal application json failed, rejecting the calls %#v", err))
+		return nil
 	}
 
 	if data.AppResponse.AuthID == "" {
@@ -87,7 +94,7 @@ func getXMLApplication(evHeaderMap map[string]string) *models.CallRequest {
 	pulse := float64(data.AppResponse.InitPulse)
 	rate := pulse * data.AppResponse.Rate
 	VendorAuthID := data.AppResponse.VendorAuthID
-	if VendorAuthID == "" {
+	if VendorAuthID == "" || len(VendorAuthID) < 12 {
 		VendorAuthID = "TINIYO1SECRET1AUTHID"
 	}
 	cr := models.CallRequest{}
@@ -107,6 +114,7 @@ func getXMLApplication(evHeaderMap map[string]string) *models.CallRequest {
 	cr.SrcDirection = "inbound"
 	cr.SrcType = callType
 	cr.CallerId = callerId
+	cr.Caller = callerId
 	cr.VendorAuthID = VendorAuthID
 	cr.AccountSid = data.AppResponse.AuthID
 	cr.Pulse = data.AppResponse.InitPulse
@@ -123,7 +131,7 @@ func getXMLApplication(evHeaderMap map[string]string) *models.CallRequest {
 	}
 
 	if callType == "number" {
-		exportVars := "'tiniyo_accid,parent_call_sid,parent_call_uuid,tiniyo_did_number'"
+		exportVars := constant.GetConstant("NumberExportFsVars").(string)
 		authIdSet := fmt.Sprintf("^^:tiniyo_accid=%s:tiniyo_rate=%f:"+
 			"tiniyo_pulse=%d:"+
 			"call_sid=%s:"+
@@ -137,7 +145,7 @@ func getXMLApplication(evHeaderMap map[string]string) *models.CallRequest {
 			cr.ParentCallSid, numberSanity(phoneNumber), data.AppResponse.Host, exportVars)
 		_ = MsAdapter.MultiSet(cr.CallSid, authIdSet)
 	} else {
-		exportVars := "'tiniyo_accid,parent_call_sid,parent_call_uuid'"
+		exportVars := constant.GetConstant("ExportFsVars").(string)
 		authIdSet := fmt.Sprintf("^^:tiniyo_accid=%s:tiniyo_rate=%f:"+
 			"tiniyo_pulse=%d:"+
 			"call_sid=%s:"+

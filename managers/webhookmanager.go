@@ -2,14 +2,43 @@ package managers
 
 import (
 	"fmt"
-	jsoniter "github.com/json-iterator/go"
-	"github.com/neoms/logger"
-	"github.com/neoms/managers/webhooks"
-	"github.com/neoms/models"
+	"github.com/tiniyo/neoms/adapters"
+	"github.com/tiniyo/neoms/constant"
 	"strconv"
 	"strings"
 	"time"
+
+	jsoniter "github.com/json-iterator/go"
+	"github.com/tiniyo/neoms/logger"
+	"github.com/tiniyo/neoms/managers/webhooks"
+	"github.com/tiniyo/neoms/models"
 )
+
+type WebHookManagerInterface interface {
+	triggerCallBack(state string, callSid string, evHeader []byte) error
+	triggerRecordingCallBack(state string, callSid string, evHeader []byte) error
+	triggerDTMFCallBack(callSid string, digit string) error
+	triggerDTMFTimeoutCallBack(callSid string) error
+	updateSequenceNumber(statusCallback *models.Callback)
+	processDialNounUrl(dataCallRequest models.CallRequest)
+	processDialActionUrl(dataCallRequest models.CallRequest)
+	processParentRequest(data models.CallRequest, childState string) error
+	freeCallResource(callSid, parentCallSidKey, statusCallbackKey, parentCallSid string)
+}
+
+type WebHookManager struct {
+	callState    adapters.CallStateAdapter
+	heartBeatMgr HeartBeatManagerInterface
+	xmlMgr       XmlManagerInterface
+}
+
+func NewWebHookManager(callState adapters.CallStateAdapter, heartBeatMgr HeartBeatManagerInterface, xmlMgr XmlManagerInterface) WebHookManagerInterface {
+	return WebHookManager{
+		callState:    callState,
+		heartBeatMgr: heartBeatMgr,
+		xmlMgr: xmlMgr,
+	}
+}
 
 var FreeswitchJson = jsoniter.Config{
 	EscapeHTML:             true,
@@ -18,7 +47,7 @@ var FreeswitchJson = jsoniter.Config{
 	TagKey:                 "freeswitch",
 }.Froze()
 
-func triggerCallBack(state string, callSid string, evHeader []byte) error {
+func (wbMgr WebHookManager) triggerCallBack(state string, callSid string, evHeader []byte) error {
 	var statusCallback models.Callback
 	var dataCallRequest models.CallRequest
 	var err error
@@ -26,46 +55,56 @@ func triggerCallBack(state string, callSid string, evHeader []byte) error {
 
 	statusCallbackKey := fmt.Sprintf("statusCallback:%s", callSid)
 	logger.UuidLog("Info", callSid, fmt.Sprintf("triggerCallBack - getting current status callback with key - %s", statusCallbackKey))
-	if currentState, err := MsCB.Cs.Get(statusCallbackKey); err == nil {
+	if currentState, err := wbMgr.callState.Get(statusCallbackKey); err == nil {
 		if err := json.Unmarshal(currentState, &statusCallback); err != nil {
 			logger.UuidLog("Err", callSid, fmt.Sprintf("triggerCallBack - error while unmarshal  - %s", err.Error()))
 		}
 	}
 
-	if currentState, err := MsCB.Cs.Get(callSid); err == nil {
+	if currentState, err := wbMgr.callState.Get(callSid); err == nil {
 		if err := json.Unmarshal(currentState, &dataCallRequest); err != nil {
 			logger.UuidLog("Err", callSid, fmt.Sprintf("triggerCallBack - error while unmarshal  - %s", err.Error()))
 		}
 	}
 
-	if err := FreeswitchJson.Unmarshal(evHeader, &statusCallback); err != nil {
+	if err = FreeswitchJson.Unmarshal(evHeader, &statusCallback); err != nil {
 		logger.UuidLog("Err", callSid, fmt.Sprintf("triggerCallBack - unmarshal failed from freeswitch data - call might fail with error - %#v", err.Error()))
 		return err
 	}
 
-	updateSequenceNumber(&statusCallback)
+	wbMgr.updateSequenceNumber(&statusCallback)
 
 	evHeaderMap := make(map[string]string)
 
-	if err := json.Unmarshal(evHeader, &evHeaderMap); err != nil {
+	if err = json.Unmarshal(evHeader, &evHeaderMap); err != nil {
 		logger.Logger.WithField("uuid", callSid).Error("triggerCallBack - error while unmarshal  - ", err)
 	} else {
-		if dataCallRequest.SrcType == "sip" || dataCallRequest.SrcType == "wss" {
+		if dataCallRequest.SrcType == "number" || dataCallRequest.SrcType == "Number" || dataCallRequest.SrcType == "number_tata" {
+			fromUser := evHeaderMap["Variable_sip_from_user"]
+			statusCallback.From = fmt.Sprintf("%s", fromUser)
+			statusCallback.Caller = evHeaderMap["Variable_caller_id_number"]
+			if statusCallback.Caller == ""{
+				statusCallback.Caller = statusCallback.From
+			}
+		}else if dataCallRequest.SrcType == "sip" || dataCallRequest.SrcType == "Sip" || dataCallRequest.SrcType == "wss" {
 			fromUri := evHeaderMap["Variable_sip_from_uri"]
 			statusCallback.From = fmt.Sprintf("sip:%s", fromUri)
 			caller := evHeaderMap["Variable_Caller-ANI"]
 			statusCallback.Caller = caller
+			if caller == ""{
+				statusCallback.Caller = evHeaderMap["Variable_caller_id_number"]
+			}
 		}
-		if dataCallRequest.DestType == "sip" || dataCallRequest.DestType == "wss" {
+		if dataCallRequest.DestType == "sip" || dataCallRequest.DestType == "Sip" || dataCallRequest.DestType == "wss" {
 			statusCallback.To = evHeaderMap["Variable_sip_h_x-tiniyo-sip"]
 			statusCallback.Called = statusCallback.To
 		}
 	}
-	if dataCallRequest.To != "" && statusCallback.To == ""{
+	if dataCallRequest.To != "" && statusCallback.To == "" {
 		statusCallback.To = dataCallRequest.To
 	}
 
-	if dataCallRequest.From != "" && statusCallback.From == ""{
+	if dataCallRequest.From != "" && statusCallback.From == "" {
 		statusCallback.From = dataCallRequest.From
 	}
 
@@ -78,7 +117,7 @@ func triggerCallBack(state string, callSid string, evHeader []byte) error {
 	}
 
 	dataCallRequest.Status = state
-	statusCallback.ApiVersion = "2010-04-01"
+	statusCallback.ApiVersion = constant.GetConstant("ApiVersion").(string)
 	statusCallback.CallbackSource = "call-progress-events"
 	statusCallback.ParentCallSid = dataCallRequest.ParentCallSid
 
@@ -111,16 +150,19 @@ func triggerCallBack(state string, callSid string, evHeader []byte) error {
 	}
 
 	dataCallRequest.Callback = statusCallback
+	if statusCallback.CallSid == "" {
+		statusCallback.CallSid = callSid
+	}
 
 	if dataByte, err := json.Marshal(statusCallback); err == nil {
-		if err := MsCB.Cs.Set(statusCallbackKey, dataByte); err != nil {
+		if err := wbMgr.callState.Set(statusCallbackKey, dataByte); err != nil {
 			logger.UuidLog("Err", callSid, fmt.Sprint(" triggerCallBack - callback state update issue - ", err))
 		}
 	}
 
 	go func() {
 		if state == "answered" {
-			enableHeartbeat(dataCallRequest)
+			wbMgr.heartBeatMgr.enableHeartbeat(dataCallRequest)
 		}
 		webhooks.ProcessStatusCallbackUrl(dataCallRequest, state)
 		webhooks.ProcessDialSipStatusCallbackUrl(dataCallRequest, state)
@@ -128,27 +170,27 @@ func triggerCallBack(state string, callSid string, evHeader []byte) error {
 	}()
 
 	if callCompleted && dataCallRequest.DialAction != "" && dataCallRequest.ParentCallSid != "" {
-		processDialActionUrl(dataCallRequest)
+		wbMgr.processDialActionUrl(dataCallRequest)
 	} else if state == "initiated" && dataCallRequest.Callback.Direction == "inbound" {
-		_ = handleXmlUrl(dataCallRequest)
+		wbMgr.callForXml(callSid, dataCallRequest)
 	} else if state == "answered" && dataCallRequest.Callback.Direction == "outbound-api" {
-		_ = processParentRequest(dataCallRequest, "")
+		_ = wbMgr.processParentRequest(dataCallRequest, "")
 	} else if (state == "answered") && (dataCallRequest.DialNumberUrl != "" ||
 		dataCallRequest.DialSipUrl != "") {
-		processDialNounUrl(dataCallRequest)
+		wbMgr.processDialNounUrl(dataCallRequest)
 	}
 
 	if callCompleted {
 		parentCallSidKey := fmt.Sprintf("intercept:%s", dataCallRequest.ParentCallSid)
-		if err := MsCB.Cs.Set(parentCallSidKey, []byte(callSid)); err != nil {
+		if err := wbMgr.callState.Set(parentCallSidKey, []byte(callSid)); err != nil {
 			logger.UuidLog("Err", callSid, fmt.Sprintf("error while setting the intercept key - %s", err.Error()))
 		}
-		freeCallResource(callSid, parentCallSidKey, statusCallbackKey, dataCallRequest.ParentCallSid)
+		wbMgr.freeCallResource(callSid, parentCallSidKey, statusCallbackKey, dataCallRequest.ParentCallSid)
 	}
 	return err
 }
 
-func triggerRecordingCallBack(state string, callSid string, evHeader []byte) error {
+func (wbMgr WebHookManager) triggerRecordingCallBack(state string, callSid string, evHeader []byte) error {
 	redirect := false
 	logger.UuidLog("Err", callSid, fmt.Sprint("recording event to webhook"))
 	recordJob := models.RecordJob{}
@@ -158,13 +200,13 @@ func triggerRecordingCallBack(state string, callSid string, evHeader []byte) err
 
 	recordingKey := fmt.Sprintf("recording:%s", callSid)
 
-	if currentRecordingState, err := MsCB.Cs.Get(recordingKey); err == nil {
+	if currentRecordingState, err := wbMgr.callState.Get(recordingKey); err == nil {
 		if err := json.Unmarshal(currentRecordingState, &recordCallback); err != nil {
 			logger.UuidLog("Err", callSid, fmt.Sprintf("error while unmarshal  - %s", err.Error()))
 		}
 	}
 
-	if currentState, err := MsCB.Cs.Get(callSid); err == nil {
+	if currentState, err := wbMgr.callState.Get(callSid); err == nil {
 		logger.UuidLog("Info", callSid, fmt.Sprintf("current states from redis is - %s", currentState))
 		if err := json.Unmarshal(currentState, &dataCallRequest); err != nil {
 			logger.UuidLog("Err", callSid, fmt.Sprintf("error while unmarshal  - %s", err.Error()))
@@ -219,22 +261,21 @@ func triggerRecordingCallBack(state string, callSid string, evHeader []byte) err
 		recordJob.Args.FilePath = recordCallback.RecordingUrl
 		recordJob.Args.FileName = fmt.Sprint(recordCallback.RecordAccountSid, "-", recordCallback.RecordCallSid, ".mp3")
 		if recordJobByte, err := json.Marshal(recordJob); err == nil {
-			_ = MsCB.Cs.SetRecordingJob(recordJobByte)
+			_ = wbMgr.callState.SetRecordingJob(recordJobByte)
 		}
 		recordFile := fmt.Sprintf("https://api.%s/v1/Accounts/%s/Recordings/%s.mp3", dataCallRequest.Host,
 			recordCallback.RecordAccountSid, recordCallback.RecordingSid)
 		recordCallback.RecordingUrl = recordFile
+		webhooks.ProcessRecordingStatusCallbackUrl(dataCallRequest, state)
 	}
 	dataCallRequest.RecordCallback = recordCallback
 	logger.UuidLog("Info", callSid, fmt.Sprint("sending updates to redis - recording callback ", recordCallback))
 
-	webhooks.ProcessRecordingStatusCallbackUrl(dataCallRequest, state)
-
 	if dataByte, err := json.Marshal(recordCallback); err == nil {
-		_ = MsCB.Cs.Set(recordingKey, dataByte)
+		_ = wbMgr.callState.Set(recordingKey, dataByte)
 	}
 	if redirect {
-		_ = handleXmlUrl(dataCallRequest)
+		wbMgr.callForXml(callSid, dataCallRequest)
 	}
 	return err
 }
@@ -243,19 +284,19 @@ func triggerRecordingCallBack(state string, callSid string, evHeader []byte) err
 	In dtmf callback we are calling the statuscallback object only
 	Make sure to modify only dtmf and staus callback only
 */
-func triggerDTMFCallBack(callSid string, digit string) error {
+func (wbMgr WebHookManager) triggerDTMFCallBack(callSid string, digit string) error {
 	var dataCallRequest models.CallRequest
 	var statusCallback models.Callback
 	dtmfDone := false
 	statusCallbackKey := fmt.Sprintf("statusCallback:%s", callSid)
 	logger.UuidLog("Info", callSid, fmt.Sprintf("triggerDTMFCallBack - getting current status callback with key - %s", statusCallbackKey))
-	if currentState, err := MsCB.Cs.Get(statusCallbackKey); err == nil {
+	if currentState, err := wbMgr.callState.Get(statusCallbackKey); err == nil {
 		if err := json.Unmarshal(currentState, &statusCallback); err != nil {
 			logger.UuidLog("Err", callSid, fmt.Sprintf("triggerDTMFCallBack - error while unmarshal  - %s", err.Error()))
 		}
 	}
 
-	if currentState, err := MsCB.Cs.Get(callSid); err == nil {
+	if currentState, err := wbMgr.callState.Get(callSid); err == nil {
 		logger.UuidLog("Info", callSid, fmt.Sprintf("triggerDTMFCallBack - current states from redis is - %s", currentState))
 		if err := json.Unmarshal(currentState, &dataCallRequest); err != nil {
 			logger.UuidLog("Err", callSid, fmt.Sprintf("error while unmarshal  - %s", err.Error()))
@@ -293,14 +334,12 @@ func triggerDTMFCallBack(callSid string, digit string) error {
 			dataCallRequest.Url = dataCallRequest.GatherAction
 			dataCallRequest.Method = dataCallRequest.GatherMethod
 		}
-		go func() {
-			_ = handleXmlUrl(dataCallRequest)
-		}()
+		go wbMgr.callForXml(callSid, dataCallRequest)
 		statusCallback.Digits = ""
 	}
 
 	if dataByte, err := json.Marshal(statusCallback); err == nil {
-		if err := MsCB.Cs.Set(statusCallbackKey, dataByte); err != nil {
+		if err := wbMgr.callState.Set(statusCallbackKey, dataByte); err != nil {
 			logger.UuidLog("Err", callSid, fmt.Sprint(" triggerDTMFCallBack - callback state update issue - ", err))
 		}
 	}
@@ -311,18 +350,18 @@ func triggerDTMFCallBack(callSid string, digit string) error {
 	In dtmf callback we are calling the statuscallback object only
 	Make sure to modify only dtmf and staus callback only
 */
-func triggerDTMFTimeoutCallBack(callSid string) error {
+func (wbMgr WebHookManager) triggerDTMFTimeoutCallBack(callSid string) error {
 	var dataCallRequest models.CallRequest
 	var statusCallback models.Callback
 	statusCallbackKey := fmt.Sprintf("statusCallback:%s", callSid)
 	logger.UuidLog("Info", callSid, fmt.Sprintf("triggerDTMFCallBack - getting current status callback with key - %s", statusCallbackKey))
-	if currentState, err := MsCB.Cs.Get(statusCallbackKey); err == nil {
+	if currentState, err := wbMgr.callState.Get(statusCallbackKey); err == nil {
 		if err := json.Unmarshal(currentState, &statusCallback); err != nil {
 			logger.UuidLog("Err", callSid, fmt.Sprintf("triggerDTMFCallBack - error while unmarshal  - %s", err.Error()))
 		}
 	}
 
-	if currentState, err := MsCB.Cs.Get(callSid); err == nil {
+	if currentState, err := wbMgr.callState.Get(callSid); err == nil {
 		logger.UuidLog("Info", callSid, fmt.Sprintf("triggerDTMFCallBack - current states from redis is - %s", currentState))
 		if err := json.Unmarshal(currentState, &dataCallRequest); err != nil {
 			logger.UuidLog("Err", callSid, fmt.Sprintf("error while unmarshal  - %s", err.Error()))
@@ -336,14 +375,12 @@ func triggerDTMFTimeoutCallBack(callSid string) error {
 		dataCallRequest.Url = dataCallRequest.GatherAction
 		dataCallRequest.Method = dataCallRequest.GatherMethod
 	}
-	go func() {
-		_ = handleXmlUrl(dataCallRequest)
-	}()
+	go wbMgr.callForXml(callSid, dataCallRequest)
 	statusCallback.Digits = ""
 	return nil
 }
 
-func processParentRequest(data models.CallRequest, childState string) error {
+func (wbMgr WebHookManager) processParentRequest(data models.CallRequest, childState string) error {
 	callSid := data.CallSid
 	if data.SendDigits != "" && childState == "" {
 		digits := data.SendDigits
@@ -358,7 +395,7 @@ func processParentRequest(data models.CallRequest, childState string) error {
 	if (data.Callback.Direction == "outbound-api") ||
 		(data.Callback.Direction == "outbound-call") && childState == "answered" ||
 		(data.Callback.Direction == "inbound" && childState == "completed") {
-		ProcessXmlResponse(data)
+		wbMgr.xmlMgr.ProcessXmlResponse(data)
 	}
 	return nil
 }
@@ -366,9 +403,9 @@ func processParentRequest(data models.CallRequest, childState string) error {
 /*
 	once dial call ends it will check for action url, if action url found it will get the xml
 */
-func processDialActionUrl(dataCallRequest models.CallRequest) {
+func (wbMgr WebHookManager) processDialActionUrl(dataCallRequest models.CallRequest) {
 	callSid := dataCallRequest.CallSid
-	if callState, err := MsCB.Cs.Get(dataCallRequest.ParentCallSid); err == nil {
+	if callState, err := wbMgr.callState.Get(dataCallRequest.ParentCallSid); err == nil {
 		var parentData models.CallRequest
 		if err := json.Unmarshal(callState, &parentData); err != nil {
 			logger.UuidLog("Err", callSid, "error while unmarshal")
@@ -379,12 +416,12 @@ func processDialActionUrl(dataCallRequest models.CallRequest) {
 			parentData.DialCallDuration = dataCallRequest.CallDuration
 			parentData.DialCallSid = dataCallRequest.CallSid
 			parentData.Callback.RecordingUrl = dataCallRequest.RecordCallback.RecordingUrl
-			_ = processParentRequest(parentData, "completed")
+			_ = wbMgr.processParentRequest(parentData, "completed")
 		}
 	}
 }
 
-func processDialNounUrl(dataCallRequest models.CallRequest) {
+func (wbMgr WebHookManager) processDialNounUrl(dataCallRequest models.CallRequest) {
 	/*
 		Here we need to handle outbound call those have url set,we need to execute that
 		url on outbound leg and then do the bridge call with parent call
@@ -397,10 +434,10 @@ func processDialNounUrl(dataCallRequest models.CallRequest) {
 		dataCallRequest.Method = dataCallRequest.DialNumberMethod
 	}
 
-	_ = processParentRequest(dataCallRequest, "answered")
+	_ = wbMgr.processParentRequest(dataCallRequest, "answered")
 }
 
-func updateSequenceNumber(statusCallback *models.Callback) {
+func (wbMgr WebHookManager) updateSequenceNumber(statusCallback *models.Callback) {
 	callSid := statusCallback.CallSid
 	if statusCallback.SequenceNumber == "" {
 		statusCallback.SequenceNumber = "0"
@@ -416,13 +453,24 @@ func updateSequenceNumber(statusCallback *models.Callback) {
 	logger.UuidLog("Info", callSid, fmt.Sprintf("sequence number updated"))
 }
 
-func freeCallResource(callSid, parentCallSidKey, statusCallbackKey, parentCallSid string) {
+func (wbMgr WebHookManager) callForXml(callSid string, dataCallRequest models.CallRequest) {
+	if err := wbMgr.xmlMgr.handleXmlUrl(dataCallRequest); err != nil {
+		if err == constant.ErrGatherTimeout {
+			err = wbMgr.triggerDTMFTimeoutCallBack(callSid)
+			if err != nil {
+				logger.UuidLog("Err", callSid, fmt.Sprintf("error while sending dtmf callback"))
+			}
+		}
+	}
+}
+
+func (wbMgr WebHookManager) freeCallResource(callSid, parentCallSidKey, statusCallbackKey, parentCallSid string) {
 	time.Sleep(2 * time.Second)
-	parentSidRelationKey := fmt.Sprintf("parent:%s",parentCallSid)
+	parentSidRelationKey := fmt.Sprintf("parent:%s", parentCallSid)
 	recordingKey := fmt.Sprintf("recording:%s", callSid)
-	_ = MsCB.Cs.Del(callSid)
-	_ = MsCB.Cs.Del(parentCallSidKey)
-	_ = MsCB.Cs.Del(statusCallbackKey)
-	_ = MsCB.Cs.Del(recordingKey)
-	_ = MsCB.Cs.DelKeyMember(parentSidRelationKey, callSid)
+	_ = wbMgr.callState.Del(callSid)
+	_ = wbMgr.callState.Del(parentCallSidKey)
+	_ = wbMgr.callState.Del(statusCallbackKey)
+	_ = wbMgr.callState.Del(recordingKey)
+	_ = wbMgr.callState.DelKeyMember(parentSidRelationKey, callSid)
 }

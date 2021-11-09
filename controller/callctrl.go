@@ -4,20 +4,19 @@ import (
 	"fmt"
 	"github.com/gin-gonic/gin"
 	"net/http"
-	"github.com/neoms/logger"
-	"github.com/neoms/managers"
-	"github.com/neoms/managers/callstats"
-	"github.com/neoms/models"
+	"github.com/tiniyo/neoms/logger"
+	"github.com/tiniyo/neoms/managers"
+	"github.com/tiniyo/neoms/managers/callstats"
+	"github.com/tiniyo/neoms/models"
 )
 
 type CallController struct {
-	callManage *managers.CallManager
+	callManage managers.CallManagerInterface
 }
 
 func (u *CallController) InitializeCallController() {
 	u.callManage = new(managers.CallManager)
-	u.callManage.InitCallManager()
-	new(managers.CallBackManager).InitCallBackManager()
+	u.callManage = managers.NewCallManager()
 	new(callstats.CallStatManager).InitCallStatManager()
 }
 
@@ -93,4 +92,17 @@ func (u CallController) DeleteCall(c *gin.Context) {
 	callID := c.Param("call_id")
 	logger.Logger.Debug("Account ID :", accountID, " CallID :", callID)
 	u.callManage.DeleteCallWithReason(callID, "DELETE_API_HANGUP")
+}
+
+func (u CallController) GetHealth(c *gin.Context) {
+	/*msg, err := managers.HealthCheck()
+	if err != nil {
+		logger.Error(msg)
+		c.String(503, msg)
+	} else {
+		c.String(200, msg)
+	}*/
+	c.JSON(200, gin.H{
+		"Status": "0",
+	})
 }

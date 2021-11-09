@@ -4,23 +4,23 @@ import (
 	"encoding/json"
 	"fmt"
 	"net"
-	"github.com/neoms/config"
-	"github.com/neoms/helper"
-	"github.com/neoms/logger"
-	"github.com/neoms/managers/callstats"
-	"github.com/neoms/models"
+	"github.com/tiniyo/neoms/config"
+	"github.com/tiniyo/neoms/helper"
+	"github.com/tiniyo/neoms/logger"
+	"github.com/tiniyo/neoms/managers/callstats"
+	"github.com/tiniyo/neoms/models"
 	"strings"
 )
 
 func GetOutboundRateRoutes(callSid, vendorAuthId, authId, phoneNumber string) (string, *models.RatingRoutingResponse) {
 	baseUrl := config.Config.Rating.BaseUrl
 	region := config.Config.Rating.Region
-	url := fmt.Sprintf("%s/%s/Tenants/%s/%s/%s", baseUrl, vendorAuthId, authId, region, phoneNumber)
-	if vendorAuthId == "" || vendorAuthId == "TINIYO1SECRET1AUTHID" {
+
+	if vendorAuthId == "" || len(vendorAuthId)<12{
 		vendorAuthId = "TINIYO1SECRET1AUTHID"
-		url = fmt.Sprintf("%s/%s/Tenants/%s/%s/%s", baseUrl, vendorAuthId, "DEFAULT", region, phoneNumber)
 	}
 
+	url := fmt.Sprintf("%s/%s/Tenants/%s/%s/%s", baseUrl, vendorAuthId, authId, region, phoneNumber)
 	logger.UuidLog("Info", callSid, fmt.Sprint("fetching rates with url - ", url))
 
 	var data models.RatingRoutingResponse

@@ -3,21 +3,25 @@ package managers
 import (
 	"errors"
 	"fmt"
-	"github.com/neoms/adapters"
-	"github.com/neoms/adapters/callstate"
-	"github.com/neoms/adapters/factory"
-	"github.com/neoms/helper"
-	"github.com/neoms/logger"
-	"github.com/neoms/managers/rateroute"
-	"github.com/neoms/models"
+	"github.com/tiniyo/neoms/constant"
 	"strings"
+
+	"github.com/tiniyo/neoms/adapters"
+	"github.com/tiniyo/neoms/adapters/callstate"
+	"github.com/tiniyo/neoms/adapters/factory"
+	"github.com/tiniyo/neoms/helper"
+	"github.com/tiniyo/neoms/logger"
+	"github.com/tiniyo/neoms/managers/rateroute"
+	"github.com/tiniyo/neoms/models"
 )
 
-const (
-	GatewayDialString     = "sofia/gateway/pstn_trunk"
-	SipGatwayDialString   = "sofia/gateway/pstn_trunk"
-	DefaultVendorAuthId   = "TINIYO1SECRET1AUTHID"
-)
+type CallManagerInterface interface {
+	CreateCall(cr *models.CallRequest) (*models.CallResponse, error)
+	DeleteCallWithReason(callSid string, reason string)
+	DeleteCall(callSid string)
+	GetCall(callSid string) (*models.CallResponse, error)
+	UpdateCall(cr models.CallUpdateRequest) (*models.CallResponse, error)
+}
 
 type CallManager struct {
 	callState adapters.CallStateAdapter
@@ -25,17 +29,21 @@ type CallManager struct {
 
 var MsAdapter adapters.MediaServer
 
-func (cm *CallManager) InitCallManager() {
-	cm.callState, _ = callstate.NewCallStateAdapter()
+func NewCallManager() CallManagerInterface {
+	var err error
+	cm := CallManager{}
+	if cm.callState, err = callstate.NewCallStateAdapter(); err!=nil{
+		return nil
+	}
 	MsAdapter = factory.GetMSInstance()
-	var msCallbacker adapters.MediaServerCallbacker
-	MsAdapter.InitializeCallbackMediaServers(msCallbacker)
+	msCallBacker := new(CallBackManager)
+	msCallBacker.InitCallBackManager()
+	//here we initialize 2 connections 1 for callback and 1 for sending command
+	if err = MsAdapter.InitializeCallbackMediaServers(msCallBacker);err != nil {
+		return nil
+	}
+	return cm
 }
-
-
-/*
-	415 - rateroute not found
- */
 
 func (cm CallManager) CreateCall(cr *models.CallRequest) (*models.CallResponse, error) {
 	var routingString = ""
@@ -43,7 +51,7 @@ func (cm CallManager) CreateCall(cr *models.CallRequest) (*models.CallResponse, 
 	callResponse := models.CallResponse{}
 
 	if cr.VendorAuthID == "" {
-		cr.VendorAuthID = DefaultVendorAuthId
+		cr.VendorAuthID = constant.GetConstant("DefaultVendorAuthId").(string)
 	}
 
 	status, rateRoutes := rateroute.GetOutboundRateRoutes(cr.Sid, cr.VendorAuthID, cr.AccountSid, destination)
@@ -54,7 +62,6 @@ func (cm CallManager) CreateCall(cr *models.CallRequest) (*models.CallResponse, 
 			Err:        errors.New("rates not set for destination"),
 		}
 	}
-
 
 	if helper.IsSipCall(destination) {
 		logger.Logger.Info("sip call processing, skipping route processing")
@@ -71,20 +78,20 @@ func (cm CallManager) CreateCall(cr *models.CallRequest) (*models.CallResponse, 
 		for _, rt := range rateRoutes.Term {
 			var routingToken = helper.JwtTokenInfo{}
 
-			if rt.RemovePrefix != ""{
+			if rt.RemovePrefix != "" {
 				cr.To = strings.TrimPrefix(cr.To, "+")
-				cr.To = strings.TrimPrefix(cr.To,  rt.RemovePrefix)
+				cr.To = strings.TrimPrefix(cr.To, rt.RemovePrefix)
 			}
-			if rt.FromRemovePrefix != ""{
+			if rt.FromRemovePrefix != "" {
 				cr.From = strings.TrimPrefix(cr.From, "+")
-				cr.From = strings.TrimPrefix(cr.From,  rt.FromRemovePrefix)
+				cr.From = strings.TrimPrefix(cr.From, rt.FromRemovePrefix)
 				cr.FromRemovePrefix = rt.FromRemovePrefix
 			}
-			if rt.TrunkPrefix != ""{
-				cr.To = fmt.Sprintf("%s%s",rt.TrunkPrefix,cr.To)
+			if rt.TrunkPrefix != "" {
+				cr.To = fmt.Sprintf("%s%s", rt.TrunkPrefix, cr.To)
 			}
 
-			if rt.SipPilotNumber != ""{
+			if rt.SipPilotNumber != "" {
 				cr.SipPilotNumber = rt.SipPilotNumber
 			}
 			if routingString == "" {
@@ -139,7 +146,7 @@ func (cm CallManager) CreateCall(cr *models.CallRequest) (*models.CallResponse, 
 	callResponse.Sid = cr.Sid
 	cr.DestType = "api"
 	callResponse.AccountSid = cr.AccountSid
-	callResponse.APIVersion = "2010-04-01"
+	callResponse.APIVersion = constant.GetConstant("ApiVersion").(string)
 	callResponse.Status = "queued"
 	callResponse.FromFormatted = cr.From
 	callResponse.ToFormatted = cr.To
@@ -168,15 +175,18 @@ func (cm CallManager) CreateCall(cr *models.CallRequest) (*models.CallResponse, 
 		toUser = sipTo[0]
 	}
 
+	gwDialStr := constant.GetConstant("GatewayDialString").(string)
+	gwSipDialStr := constant.GetConstant("SipGatwayDialString").(string)
+
 	if routingString != "" {
 		cmd = fmt.Sprintf("bgapi originate {%s,sip_h_X-Tiniyo-Gateway=%s}%s/%s &park",
-			originateStr, routingString, GatewayDialString, toUser)
+			originateStr, routingString, gwDialStr, toUser)
 	} else if helper.IsSipCall(destination) && strings.Contains(destination, "phone.tiniyo.com") {
-		cmd = fmt.Sprintf("bgapi originate {%s,sip_h_X-Tiniyo-Gateway=%s,sip_h_X-Tiniyo-Phone=user}%s/%s &park",
-			originateStr, destination, SipGatwayDialString, toUser)
+		cmd = fmt.Sprintf("bgapi originate {%s,sip_h_X-Tiniyo-Sip=%s,sip_h_X-Tiniyo-Phone=user}%s/%s &park",
+			originateStr, destination, gwSipDialStr, toUser)
 	} else {
 		cmd = fmt.Sprintf("bgapi originate {%s,sip_h_X-Tiniyo-Gateway=%s,sip_h_X-Tiniyo-Phone=sip}%s/%s &park",
-			originateStr, destination, SipGatwayDialString, toUser)
+			originateStr, destination, gwSipDialStr, toUser)
 	}
 
 	logger.Logger.Debugln("Command : ", cmd)
@@ -199,35 +209,35 @@ func (cm CallManager) UpdateCall(cr models.CallUpdateRequest) (*models.CallRespo
 			return nil, err
 		}
 
-		if cr.StatusCallback != ""{
+		if cr.StatusCallback != "" {
 			data.StatusCallback = cr.StatusCallback
 		}
-		if cr.StatusCallbackMethod != ""{
+		if cr.StatusCallbackMethod != "" {
 			data.StatusCallback = cr.StatusCallbackMethod
 		}
-		if cr.Url != ""{
+		if cr.Url != "" {
 			data.Url = cr.Url
 		}
-		if cr.Method != ""{
+		if cr.Method != "" {
 			data.Method = cr.Method
 		}
-		if cr.FallbackUrl != ""{
+		if cr.FallbackUrl != "" {
 			data.FallbackUrl = cr.FallbackUrl
 		}
-		if cr.FallbackMethod != ""{
+		if cr.FallbackMethod != "" {
 			data.FallbackMethod = cr.FallbackMethod
 		}
 
-		if cr.Status == "canceled" && data.Status != "in-progress"{
-		 	cm.DeleteCall(callSid)
+		if cr.Status == "canceled" && data.Status != "in-progress" {
+			cm.DeleteCall(callSid)
 			data.Status = "canceled"
-		}else if cr.Status == "completed" {
+		} else if cr.Status == "completed" {
 			cm.DeleteCall(callSid)
 			data.Status = "completed"
 		}
 
 		if dataByte, err := json.Marshal(data); err == nil {
-			if err := MsCB.Cs.Set(callSid, dataByte); err != nil {
+			if err := cm.callState.Set(callSid, dataByte); err != nil {
 				logger.UuidLog("Err", callSid, fmt.Sprint(" triggerCallBack - callback state update issue - ", err))
 			}
 		}

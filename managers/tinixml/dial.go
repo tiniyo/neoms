@@ -3,18 +3,19 @@ package tinixml
 import (
 	"errors"
 	"fmt"
-	"github.com/beevik/etree"
-	uuid4 "github.com/satori/go.uuid"
 	"net"
-	"github.com/neoms/adapters"
-	"github.com/neoms/config"
-	"github.com/neoms/helper"
-	"github.com/neoms/logger"
-	"github.com/neoms/managers/callstats"
-	"github.com/neoms/managers/rateroute"
-	"github.com/neoms/models"
 	"strconv"
 	"strings"
+
+	"github.com/beevik/etree"
+	uuid4 "github.com/satori/go.uuid"
+	"github.com/tiniyo/neoms/adapters"
+	"github.com/tiniyo/neoms/config"
+	"github.com/tiniyo/neoms/helper"
+	"github.com/tiniyo/neoms/logger"
+	"github.com/tiniyo/neoms/managers/callstats"
+	"github.com/tiniyo/neoms/managers/rateroute"
+	"github.com/tiniyo/neoms/models"
 )
 
 //Default time-limit of calls is 240 minute or 4 hours
@@ -104,22 +105,24 @@ func ProcessDial(msAdapter *adapters.MediaServer, data models.CallRequest, child
 	/*
 		dial string and conference name not found, exit from call
 	*/
+
+	/* I moved this code as not matching up with twilio
+	else if confName != "" && dialString != "" {
+	logger.UuidLog("Info", parentCallSid, fmt.Sprintf("conference name is %s and dial string is %s",
+		confName, dialString))
+	confBridgeCmd := fmt.Sprintf("%s bgdial %s", confName, dialString)
+	err = (*msAdapter).ConfSetAutoCall(data.Sid, dialString)
+	if err != nil {
+		logger.UuidLog("Err", parentCallSid, err.Error())
+		return false, false, err
+	}
+	err = (*msAdapter).ConfBridge(data.Sid, confBridgeCmd)*/
+
 	if dialString == "" && confName == "" {
 		logger.UuidLog("Err", parentCallSid, "Empty dial string and conference name")
 		err = ProcessHangupWithTiniyoReason(msAdapter, data.CallSid, "EMPTY_DIAL_STRING")
-	} else if confName != "" && dialString != "" {
-		logger.UuidLog("Info", parentCallSid, fmt.Sprintf("conference name is %s and dial string is %s",
-			confName, dialString))
-		confBridgeCmd := fmt.Sprintf("%s bgdial %s", confName, dialString)
-		err = (*msAdapter).ConfSetAutoCall(data.Sid, dialString)
-		if err != nil {
-			logger.UuidLog("Err", parentCallSid, err.Error())
-			return false, false, err
-		}
-		err = (*msAdapter).ConfBridge(data.Sid, confBridgeCmd)
 	} else if confName != "" {
-		confBridgeCmd := fmt.Sprintf("%s bgdial %s", confName, dialString)
-		err = (*msAdapter).ConfBridge(data.Sid, confBridgeCmd)
+		err = (*msAdapter).ConfBridge(data.Sid, confName)
 	} else {
 		if callReq.DialNumberUrl == "" {
 			err = (*msAdapter).CallBridge(data.Sid, dialString)
@@ -152,39 +155,39 @@ func setDialAttribute(data *models.CallRequest, uuid string, child etree.Element
 	data.DialTimeout = "30"
 	data.DialRingTone = "%(2000,4000,440.0,480.0)"
 	for _, attr := range child.Attr {
-		switch attr.Key {
+		switch strings.ToLower(attr.Key) {
 		case "action":
 			data.DialAction = attr.Value
-		case "answerOnBridge":
+		case "answeronbridge":
 			data.DialAnswerOnBridge = attr.Value
-		case "callerId":
+		case "callerid":
 			data.DialCallerId = attr.Value
 			data.CallerId = attr.Value
-		case "callReason":
+		case "callreason":
 			data.CallReason = attr.Value
-		case "hangupOnStar":
+		case "hanguponstar":
 			data.DialHangupOnStar = attr.Value
 		case "method":
 			data.DialMethod = attr.Value
 		case "record":
 			data.Record = attr.Value
 			data.RecordingSource = "DialVerb"
-		case "recordingStatusCallback":
+		case "recordingstatuscallback":
 			data.RecordingStatusCallback = attr.Value
-		case "recordingStatusCallbackMethod":
+		case "recordingstatuscallbackmethod":
 			data.RecordingStatusCallbackMethod = attr.Value
-		case "recordingStatusCallbackEvent":
+		case "recordingstatuscallbackevent":
 			data.RecordingStatusCallbackEvent = attr.Value
-		case "ringTone":
+		case "ringtone":
 			if helper.IsValidRingTone(attr.Value) {
 				data.DialRingTone = fmt.Sprintf("${%s-ring}", attr.Value)
 			}
 			if strings.HasPrefix(attr.Value, "http") {
 				data.DialRingTone = fmt.Sprintf("%s", attr.Value)
 			}
-		case "recordingTrack":
+		case "recordingtrack":
 			data.RecordingTrack = attr.Value
-		case "timeLimit":
+		case "timelimit":
 			if helper.IsValidTimeLimit(attr.Value) {
 				data.DialTimeLimit = attr.Value
 			}
@@ -336,6 +339,7 @@ func processDialChildes(data *models.CallRequest, uuid string, child etree.Eleme
 	/*
 		We need to create a copy of data
 	*/
+
 	for _, dialChild := range child.ChildElements() {
 		uuidGen := uuid4.NewV4().String()
 		data.Sid = uuidGen
@@ -345,9 +349,13 @@ func processDialChildes(data *models.CallRequest, uuid string, child etree.Eleme
 			ProcessSipAttr(data, dialChild)
 		case "Number":
 			ProcessNumberAttr(data, dialChild)
+		case "Conference":
+			confName = ProcessConference(data.CallSid, dialChild, data.AccountSid)
+			continue
 		default:
 			logger.UuidLog("Err", uuid, fmt.Sprintf("Dial Tag is not supported %s", dialChild.Tag))
 		}
+
 		dialDest := fmt.Sprintf("%s", dialChild.Text())
 		dialVars, err := getDialAttributeDialString(data, dialDest)
 		if err != nil {
@@ -405,9 +413,7 @@ func processDialChildes(data *models.CallRequest, uuid string, child etree.Eleme
 			} else {
 				dialNode = ProcessSip(dialVars, dialDest)
 			}
-		} else if dialChild.Tag == "Conference" {
-			confName = ProcessConference(data.CallSid, dialChild, data.AccountSid)
-		} else {
+		} else { //PSTN Phone Number
 			dialVars = fmt.Sprintf("%s,call_sid=%s,origination_uuid=%s,"+
 				"tiniyo_rate=%f,tiniyo_pulse=%d,"+
 				"sip_h_X-Tiniyo-Gateway=%s",

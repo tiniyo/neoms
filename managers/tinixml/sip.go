@@ -4,10 +4,10 @@ import (
 	"encoding/json"
 	"fmt"
 	"github.com/beevik/etree"
-	"github.com/neoms/config"
-	"github.com/neoms/helper"
-	"github.com/neoms/logger"
-	"github.com/neoms/models"
+	"github.com/tiniyo/neoms/config"
+	"github.com/tiniyo/neoms/helper"
+	"github.com/tiniyo/neoms/logger"
+	"github.com/tiniyo/neoms/models"
 	"strings"
 )
 

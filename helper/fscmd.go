@@ -2,8 +2,9 @@ package helper
 
 import (
 	"fmt"
-	"github.com/neoms/logger"
-	"github.com/neoms/models"
+	uuid4 "github.com/satori/go.uuid"
+	"github.com/tiniyo/neoms/logger"
+	"github.com/tiniyo/neoms/models"
 	"strconv"
 	"strings"
 )
@@ -76,6 +77,7 @@ func GenDialString(cr *models.CallRequest) string {
 
 	if cr.Record == "true" {
 		recordDir := "/call_recordings"
+		originateVars["recording_sid"] = uuid4.NewV4().String()
 		recordFile := fmt.Sprintf("%s/%s-%s.mp3", recordDir, cr.AccountSid, cr.Sid)
 		recordString := fmt.Sprintf("'record_session %s'", recordFile)
 		originateVars["media_bug_answer_req"] = "true"

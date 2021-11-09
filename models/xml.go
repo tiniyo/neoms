@@ -53,3 +53,25 @@ type GatherAttr struct {
 	GatherActionOnEmptyResult string `json:"GatherActionOnEmptyResult"`
 	GatherEnhanced            string `json:"GatherEnhanced"`
 }
+
+type DialConferenceAttr struct {
+	DialConferenceMuted                         string `json:"DialConferenceMuted"`
+	DialConferenceBeep                          string `json:"DialConferenceBeep"`
+	DialConferenceStartConferenceOnEnter        string `json:"DialConferenceStartConferenceOnEnter"`
+	DialConferenceEndConferenceOnExit           string `json:"DialConferenceEndConferenceOnExit"`
+	DialConferenceParticipantLabel              string `json:"DialConferenceParticipantLabel"`
+	DialConferenceStatusCallbackEvent           string `json:"DialConferenceStatusCallbackEvent"`
+	DialConferenceStatusCallback                string `json:"DialConferenceStatusCallback"`
+	DialConferenceStatusCallbackMethod          string `json:"DialConferenceStatusCallbackMethod"`
+	DialConferenceJitterBufferSize              string `json:"DialConferenceJitterBufferSize"`
+	DialConferenceWaitUrl                       string `json:"DialConferenceWaitUrl"`
+	DialConferenceWaitMethod                    string `json:"DialConferenceWaitMethod"`
+	DialConferenceMaxParticipants               string `json:"DialConferenceMaxParticipants"`
+	DialConferenceRecord                        string `json:"DialConferenceRecord"`
+	DialConferenceRegion                        string `json:"DialConferenceRegion"`
+	DialConferenceTrim                          string `json:"DialConferenceTrim"`
+	DialConferenceCoach                         string `json:"DialConferenceCoach"`
+	DialConferenceRecordingStatusCallback       string `json:"DialConferenceRecordingStatusCallback"`
+	DialConferenceRecordingStatusCallbackEvent  string `json:"DialConferenceRecordingStatusCallbackEvent"`
+	DialConferenceRecordingStatusCallbackMethod string `json:"DialConferenceRecordingStatusCallbackMethod"`
+}

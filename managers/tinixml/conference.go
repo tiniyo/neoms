@@ -3,7 +3,9 @@ package tinixml
 import (
 	"fmt"
 	"github.com/beevik/etree"
-	"github.com/neoms/logger"
+	"net/url"
+	"github.com/tiniyo/neoms/logger"
+	"github.com/tiniyo/neoms/models"
 )
 
 /*
@@ -23,8 +25,27 @@ import (
 						the conference terminates and all participants drop out of the call. Default is false.
 
 */
-func ProcessConference(uuid string, element *etree.Element, authId string) string {
-	logger.Logger.Debug("Creating Conference for " + uuid + "with name " + element.Text())
-	confName := fmt.Sprintf("%s-%s@tiniyo", authId, element.Text())
+func ProcessConference(callSid string, element *etree.Element, authId string) string {
+	confName := fmt.Sprintf("%s-%s@tiniyo", authId, url.PathEscape(element.Text()))
+	//check if conference already running
+	//on which mediaserver its running
+	//loopback to that mediaserver bridge conference
+	//save attr to centralise system
+	//query using conference name get attr also
+	logger.UuidLog("Info", callSid, fmt.Sprintf("conference name is %s", confName))
 	return confName
+}
+
+func ProcessConferenceAttr(data *models.CallRequest, child *etree.Element) {
+	data.DialConferenceAttr.DialConferenceBeep = "true"
+	for _, attr := range child.Attr {
+		switch attr.Key {
+		case "beep":
+			if attr.Value == "false" || attr.Value == "onEnter" || attr.Value == "onExit" {
+				data.DialConferenceAttr.DialConferenceBeep = attr.Value
+			}
+		default:
+			logger.UuidLog("Err", data.ParentCallSid, fmt.Sprint("Attribute not supported - ", attr.Key))
+		}
+	}
 }
