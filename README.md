@@ -38,10 +38,10 @@
   <p align="center">
      The open-source alternative to Twilio.
     <br />
-    <a href="https://github.com/tiniyo/neoms"><strong>Explore the docs »</strong></a>
+    <a href="https://tiniyo.com/dist/index-v1.html?version=v1"><strong>Explore the docs »</strong></a>
     <br />
     <br />
-    <a href="https://github.com/tiniyo/neoms">View Demo</a>
+    <a href="https://tiniyo.com">View Demo</a>
     ·
     <a href="https://github.com/tiniyo/neoms/issues">Report Bug</a>
     ·
@@ -82,7 +82,7 @@
 <!-- ABOUT THE PROJECT -->
 ## About The Project
 
-[![Product Name Screen Shot][product-screenshot]](https://example.com)
+[![Product Name Screen Shot][product-screenshot]](https://tiniyo.com)
 
 Project NeoMs is open-source alternative to twilio voice api. It helps software developer or enterprises to build CPaaS like twilio with their infrastructure.
 
@@ -133,7 +133,7 @@ NeoMs required local redis on each server where you setup NeoMs. Redis is used f
    cd neoms
    go mod download
    ```
-3. Please enter your api configurations using environment variable. 
+3. Please enter your api configurations using environment variable.
    ```sh
    EXPORT REGION=ALL
    EXPORT SER_USER=API_BASIC_AUTH_USER
@@ -145,8 +145,12 @@ NeoMs required local redis on each server where you setup NeoMs. Redis is used f
    EXPORT RATING_ROUTING_SERVICE=RATING_ROUTING_SERVICE_URL
    EXPORT CDR_SERVICE=CDR_SERVICE_URL
    EXPORT RECORDING_SERVICE=RECORDING_SERVICE_URL
-   
    ```
+4. build the neoms and run the n
+```sh
+go build -o neoms main.go
+./neoms
+```
 
 <p align="right">(<a href="#top">back to top</a>)</p>
 
