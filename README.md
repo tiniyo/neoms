@@ -252,4 +252,4 @@ Project Link: [https://github.com/tiniyo/neoms](https://github.com/tiniyo/neoms)
 [license-url]: https://github.com/tiniyo/neoms/blob/master/LICENSE.txt
 [linkedin-shield]: https://img.shields.io/badge/-LinkedIn-black.svg?style=for-the-badge&logo=linkedin&colorB=555
 [linkedin-url]: https://in.linkedin.com/company/tiniyo
-[product-screenshot]: images/screenshot.png
+[product-screenshot]: images/cpass.jpeg
